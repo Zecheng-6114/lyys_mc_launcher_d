@@ -5,6 +5,8 @@
 
 ## [未发布]
 
+## [v0.0.3-alpha] - 2026-11-14
+
 ### 新增
 - 正版登录：微软设备码流程（XBL → XSTS → Minecraft），新增 `login` / `logout` 子命令，
   令牌自动续期；启动时已登录则自动使用正版身份，`--offline` / `--username` 可强制离线
@@ -12,6 +14,15 @@
 - 模组管理：新增 `mods list|remove|toggle|update` 子命令与实例设置页模组面板，
   支持列出（jar 元数据解析 + Modrinth 来源识别）、启停（`.jar.disabled` 后缀）、
   按名删除与 Modrinth 来源模组的一键批量更新
+
+### 变更
+- 设置页与下载页的路径输入支持通过文件对话框选择
+
+### 修复
+- 命令行未知参数不再被静默忽略，改为报错并退出
+- Java 路径填写 JDK 目录或空值时无法定位 java 可执行文件
+- 离开实例设置页后仍保留上次实例名，任务完成时会刷新旧实例的模组列表
+- 实例设置保存按钮改为固定在页面底部，不再随内容滚动移出视野
 
 ## [v0.0.2-alpha] - 2026-11-14
 
@@ -51,6 +62,7 @@
 ### 修复
 - 适配 zip 9 API 并升级依赖
 
-[未发布]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.2-alpha...HEAD
+[未发布]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.3-alpha...HEAD
+[v0.0.3-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.2-alpha...v0.0.3-alpha
 [v0.0.2-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.1-alpha...v0.0.2-alpha
 [v0.0.1-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/releases/tag/v0.0.1-alpha

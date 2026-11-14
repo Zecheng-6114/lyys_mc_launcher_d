@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "lyys_mc_launcher"
-version = "0.0.2-alpha"
+version = "0.0.3-alpha"
 dependencies = [
  "gpui-base",
  "gpui-component",
