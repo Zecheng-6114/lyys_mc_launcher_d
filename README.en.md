@@ -12,7 +12,7 @@ A Minecraft launcher built with Rust and GPUI, offering both a graphical interfa
 - **Version installation**: one-click installation of Vanilla, or with the Fabric / Forge / NeoForge loader on top
 - **Version inheritance chain**: fully resolves the `inheritsFrom` chain and merges libraries and launch arguments
 - **Modpack import**: supports Modrinth (`.mrpack`), CurseForge, MCBBS, and server modpacks, with `--dry-run` preview
-- **Mod management**: search and install mods via the Modrinth API, with automatic dependency handling (optional dependencies under your control)
+- **Mod management**: search and install mods via the Modrinth API, with automatic dependency handling (optional dependencies under your control); list, toggle, and remove installed mods, with one-click updates for Modrinth-sourced ones
 - **Instance isolation**: each instance can use its own `versions/<instance>` directory as the game directory
 - **Mirror acceleration**: `--mirror` / `--maven` rewrite Mojang resource and Maven repository download sources
 - **Integrity checks**: downloads are verified with SHA1 / SHA512 and retried on failure
@@ -48,6 +48,7 @@ download: lyys_mc_launcher download --dir <game_dir> --version <version> [--load
 search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepack|shader|datapack> [--loader <a,b>] [--version <x,y>] [--limit <n>]
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
+mods:     lyys_mc_launcher mods list|remove|toggle|update --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 ```
@@ -67,6 +68,9 @@ lyys_mc_launcher login
 
 # Import a modpack from Modrinth
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
+
+# List installed mods of an instance (remove / toggle / update likewise)
+lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 ```
 
 ## Configuration
@@ -109,6 +113,7 @@ src/
 ├── installer.rs   # Forge installer processor execution
 ├── metadata.rs    # Loader artifact resolution
 ├── modrinth.rs    # Modrinth search and installation
+├── mods.rs        # Installed mod listing, toggling, removal and updates
 ├── modpack.rs     # Modpack import (modpack/ implements each provider)
 ├── instance.rs    # Instance configuration and isolation
 ├── launch.rs      # Launch argument construction

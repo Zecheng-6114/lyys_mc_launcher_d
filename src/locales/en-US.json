@@ -12,6 +12,7 @@
   "instances.action.cancel": "Cancel",
   "instances.action.folder": "Folder",
   "instances.action.settings": "Settings",
+  "common.browse": "Browse…",
   "common.refresh": "Refresh",
 
   "page.download.title": "Download",
@@ -63,6 +64,10 @@
   "instance_settings.instance": "Instance",
   "instance_settings.override": "Override global settings",
   "instance_settings.isolate.title": "Version isolation",
+  "instance_settings.mods.title": "Mods",
+  "instance_settings.mods.empty": "No mods installed",
+  "instance_settings.mods.unknown": "Unknown source",
+  "instance_settings.mods.remove": "Remove",
   "instance_settings.save": "Save instance settings",
 
   "page.tasks.title": "Tasks",
@@ -82,6 +87,8 @@
   "task.title.add": "Add {slug}",
   "task.title.login": "Microsoft sign-in",
   "task.title.logout": "Sign out",
+  "task.title.mods_toggle": "Toggle {name} mods",
+  "task.title.mods_remove": "Remove {name} mods",
   "log.start_failed": "Failed to start task",
   "log.exit": "Task exited: {status}",
   "log.cancelled": "Task cancelled",

@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, CursorStyle, Div, ElementId, Entity, IntoElement,
-    ParentElement, Render, ScrollHandle, SharedString, Stateful, Styled, Window, WindowBounds,
-    WindowOptions, div, prelude::*, px, size,
+    ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString, Stateful, Styled, Window,
+    WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Root, Sizable, StyledExt, TitleBar, h_flex, input,
@@ -27,6 +27,7 @@ use smol::channel;
 
 use crate::i18n::{self, Lang};
 use crate::instance::{self, LaunchConfig};
+use crate::mods;
 
 mod skin {
     use gpui::{Rgba, rgb};
@@ -162,6 +163,15 @@ struct InstanceRow {
     isolated: bool,
 }
 
+#[derive(Clone, Copy)]
+enum PathTarget {
+    GameDir,
+    Java,
+    InstanceJava,
+    InstallJava,
+    ImportFile,
+}
+
 pub struct LauncherUi {
     tab: usize,
     instance_page: usize,
@@ -202,6 +212,7 @@ pub struct LauncherUi {
     cfg_mirror_input: Entity<input::InputState>,
     cfg_maven_input: Entity<input::InputState>,
     cfg_isolate: bool,
+    mods: Vec<mods::ModEntry>,
 
     import_file_input: Entity<input::InputState>,
     import_name_input: Entity<input::InputState>,
@@ -291,6 +302,7 @@ impl LauncherUi {
             cfg_mirror_input: input(window, &settings.mirror.clone(), cx),
             cfg_maven_input: input(window, &settings.maven.clone(), cx),
             cfg_isolate: false,
+            mods: Vec::new(),
 
             import_file_input: input(window, "", cx),
             import_name_input: input(window, "", cx),
@@ -499,6 +511,15 @@ impl LauncherUi {
                 }
                 if refresh {
                     this.reload(cx);
+                    let task_instance = this
+                        .tasks
+                        .iter()
+                        .find(|task| task.id == id)
+                        .and_then(|task| task.instance.clone());
+                    if task_instance.as_deref() == Some(this.cfg_name.as_ref()) {
+                        let name = this.cfg_name.clone();
+                        this.load_mods(&name, cx);
+                    }
                 }
                 cx.notify();
             })
@@ -619,6 +640,120 @@ impl LauncherUi {
         );
     }
 
+    fn load_mods(&mut self, name: &str, cx: &mut Context<Self>) {
+        let dir = Self::value(&self.dir_input, cx);
+        let (event_tx, event_rx) = channel::unbounded::<Vec<mods::ModEntry>>();
+        let instance = SharedString::from(name.to_string());
+        let scan_instance = instance.clone();
+        std::thread::spawn(move || {
+            let notify_tx = event_tx.clone();
+            let _ = mods::list_with_progress(&dir, &scan_instance, move |entries| {
+                let _ = notify_tx.send_blocking(entries.to_vec());
+            });
+        });
+
+        cx.spawn(async move |weak, cx| {
+            while let Ok(entries) = event_rx.recv().await {
+                weak.update(cx, |this, cx| {
+                    if this.cfg_name == instance {
+                        this.mods = entries;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn toggle_mod(&mut self, file: &str, cx: &mut Context<Self>) {
+        let dir = Self::value(&self.dir_input, cx);
+        let name = self.cfg_name.to_string();
+        if dir.is_empty() || name.is_empty() {
+            return;
+        }
+        if let Some(id) = self.running_task_for(&name) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
+        let args = vec![
+            String::from("mods"),
+            String::from("toggle"),
+            String::from("--dir"),
+            dir,
+            String::from("--name"),
+            name.clone(),
+            String::from("--mod"),
+            String::from(file),
+        ];
+        let title = self.t_args("task.title.mods_toggle", &[("name", &name)]);
+        self.start_task(title, Some(SharedString::from(name)), args, true, None, cx);
+    }
+
+    fn remove_mod(&mut self, file: &str, cx: &mut Context<Self>) {
+        let dir = Self::value(&self.dir_input, cx);
+        let name = self.cfg_name.to_string();
+        if dir.is_empty() || name.is_empty() {
+            return;
+        }
+        if let Some(id) = self.running_task_for(&name) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
+        let args = vec![
+            String::from("mods"),
+            String::from("remove"),
+            String::from("--dir"),
+            dir,
+            String::from("--name"),
+            name.clone(),
+            String::from("--mod"),
+            String::from(file),
+        ];
+        let title = self.t_args("task.title.mods_remove", &[("name", &name)]);
+        self.start_task(title, Some(SharedString::from(name)), args, true, None, cx);
+    }
+
+    fn pick_path(&mut self, target: PathTarget, window: &mut Window, cx: &mut Context<Self>) {
+        let (entity, directories, title) = match target {
+            PathTarget::GameDir => (self.dir_input.clone(), true, "settings.game_dir.title"),
+            PathTarget::Java => (self.java_input.clone(), true, "settings.java.title"),
+            PathTarget::InstanceJava => (self.cfg_java_input.clone(), true, "settings.java.title"),
+            PathTarget::InstallJava => (self.install_java_input.clone(), true, "settings.java.title"),
+            PathTarget::ImportFile => {
+                (
+                    self.import_file_input.clone(),
+                    false,
+                    "download.import.file.title",
+                )
+            }
+        };
+        let options = PathPromptOptions {
+            files: !directories,
+            directories,
+            multiple: false,
+            prompt: Some(self.t(title)),
+        };
+        let receiver = cx.prompt_for_paths(options);
+        cx.spawn_in(window, async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.first() else {
+                return;
+            };
+            let value = path.to_string_lossy().to_string();
+            weak.update_in(cx, |_this, window, cx| {
+                Self::set_input(&entity, &value, window, cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn open_folder(&mut self, name: &str, cx: &mut Context<Self>) {
         let dir = Self::value(&self.dir_input, cx);
         let path = Path::new(&dir).join("versions").join(name);
@@ -632,6 +767,7 @@ impl LauncherUi {
 
     fn back_to_instances(&mut self, cx: &mut Context<Self>) {
         self.instance_page = 0;
+        self.cfg_name = SharedString::default();
         cx.notify();
     }
 
@@ -880,6 +1016,9 @@ impl LauncherUi {
             .unwrap_or_else(|| Self::value(&self.maven_input, cx));
         Self::set_input(&self.cfg_maven_input, &maven, window, cx);
         self.cfg_isolate = config.isolate.unwrap_or(self.isolate);
+
+        self.mods = Vec::new();
+        self.load_mods(name, cx);
 
         self.instance_page = 2;
         cx.notify();
@@ -1623,7 +1762,12 @@ impl LauncherUi {
                         .child(
                             row()
                                 .child(row_title(self.t("download.import.file.title")))
-                                .child(self.input_control(&self.import_file_input)),
+                                .child(self.path_control(
+                                    &self.import_file_input,
+                                    "browse-import-file",
+                                    PathTarget::ImportFile,
+                                    cx,
+                                )),
                         )
                         .child(sep())
                         .child(
@@ -1993,7 +2137,12 @@ impl LauncherUi {
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.game_dir.title")))
-                                            .child(self.input_control(&self.dir_input)),
+                                            .child(self.path_control(
+                                                &self.dir_input,
+                                                "browse-game-dir",
+                                                PathTarget::GameDir,
+                                                cx,
+                                            )),
                                     )
                                     .child(sep())
                                     .child(
@@ -2013,7 +2162,12 @@ impl LauncherUi {
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.java.title")))
-                                            .child(self.input_control(&self.java_input)),
+                                            .child(self.path_control(
+                                                &self.java_input,
+                                                "browse-java",
+                                                PathTarget::Java,
+                                                cx,
+                                            )),
                                     )
                                     .child(sep())
                                     .child(
@@ -2199,7 +2353,12 @@ impl LauncherUi {
                     .child(
                         row()
                             .child(row_title(self.t("settings.java.title")))
-                            .child(self.input_control(&self.install_java_input)),
+                            .child(self.path_control(
+                                &self.install_java_input,
+                                "browse-install-java",
+                                PathTarget::InstallJava,
+                                cx,
+                            )),
                     )
                     .child(sep())
                     .child(
@@ -2233,6 +2392,102 @@ impl LauncherUi {
                     cx.listener(|this, _, _, cx| this.install_version(cx)),
                 ),
             ))
+    }
+
+    fn render_mods_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut list = v_flex().w_full();
+        for (index, entry) in self.mods.iter().enumerate() {
+            let file = entry.file.clone();
+            let toggle_file = file.clone();
+            let label = if entry.version.is_empty() {
+                entry.id.clone()
+            } else {
+                format!("{} {}", entry.id, entry.version)
+            };
+            let source = entry
+                .source
+                .clone()
+                .unwrap_or_else(|| self.t("instance_settings.mods.unknown").to_string());
+
+            if index > 0 {
+                list = list.child(sep());
+            }
+            list = list.child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(12.))
+                    .px(px(20.))
+                    .py(px(10.))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(12.5))
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .text_color(skin::c(skin::FAINT))
+                                    .child(source),
+                            ),
+                    )
+                    .child(
+                        Switch::new(SharedString::from(format!("mod-switch-{index}")))
+                            .checked(!entry.disabled)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle_mod(&toggle_file, cx);
+                            })),
+                    )
+                    .child(
+                        danger_button(
+                            SharedString::from(format!("mod-remove-{index}")),
+                            self.t("instance_settings.mods.remove"),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_mod(&file, cx);
+                        })),
+                    ),
+            );
+        }
+
+        if self.mods.is_empty() {
+            list = list.child(
+                div()
+                    .px(px(20.))
+                    .py(px(10.))
+                    .text_size(px(12.5))
+                    .text_color(skin::c(skin::FAINT))
+                    .child(self.t("instance_settings.mods.empty")),
+            );
+        }
+
+        panel()
+            .child(
+                row()
+                    .child(row_title(self.t("instance_settings.mods.title")))
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .gap(px(8.))
+                            .child(
+                                text_button("mods-refresh", self.t("common.refresh")).on_click(
+                                    cx.listener(|this, _, _, cx| {
+                                        let name = this.cfg_name.clone();
+                                        this.load_mods(&name, cx);
+                                    }),
+                                ),
+                            ),
+                    ),
+            )
+            .child(sep())
+            .child(list)
     }
 
     fn render_instance_settings_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2295,7 +2550,12 @@ impl LauncherUi {
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.java.title")))
-                                            .child(self.input_control(&self.cfg_java_input)),
+                                            .child(self.path_control(
+                                                &self.cfg_java_input,
+                                                "browse-cfg-java",
+                                                PathTarget::InstanceJava,
+                                                cx,
+                                            )),
                                     )
                                     .child(sep())
                                     .child(
@@ -2326,12 +2586,39 @@ impl LauncherUi {
                                         ),
                                 ),
                             )
-                            .child(h_flex().w_full().justify_end().child(
-                                primary_button("cfg-save", self.t("instance_settings.save")).on_click(
-                                    cx.listener(|this, _, _, cx| this.save_instance_settings(cx)),
-                                ),
-                            )),
+                            .child(self.render_mods_panel(cx)),
                     ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_shrink_0()
+                    .justify_end()
+                    .child(
+                        primary_button("cfg-save", self.t("instance_settings.save")).on_click(
+                            cx.listener(|this, _, _, cx| this.save_instance_settings(cx)),
+                        ),
+                    ),
+            )
+    }
+
+    fn path_control(
+        &self,
+        state: &Entity<input::InputState>,
+        id: &'static str,
+        target: PathTarget,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .flex_shrink_0()
+            .gap(px(8.))
+            .child(self.input_control(state))
+            .child(
+                text_button(id, self.t("common.browse")).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.pick_path(target, window, cx);
+                    }),
+                ),
             )
     }
 

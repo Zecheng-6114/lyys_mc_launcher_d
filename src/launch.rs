@@ -548,8 +548,8 @@ fn tokenize(input: &str) -> Vec<String> {
 }
 
 pub fn resolve_java(explicit: Option<&str>) -> String {
-    if let Some(java) = explicit {
-        return java.to_string();
+    if let Some(java) = explicit.map(str::trim).filter(|java| !java.is_empty()) {
+        return java_executable(Path::new(java));
     }
 
     if let Some(home) = std::env::var_os("JAVA_HOME") {
@@ -563,6 +563,20 @@ pub fn resolve_java(explicit: Option<&str>) -> String {
     }
 
     String::from("java")
+}
+
+fn java_executable(path: &Path) -> String {
+    if path.is_dir() {
+        let candidate = path.join("bin").join(if cfg!(windows) {
+            "java.exe"
+        } else {
+            "java"
+        });
+        if candidate.is_file() {
+            return candidate.to_string_lossy().to_string();
+        }
+    }
+    path.to_string_lossy().to_string()
 }
 
 pub fn check_java(java: &str, version: &Value) -> Result<(), String> {

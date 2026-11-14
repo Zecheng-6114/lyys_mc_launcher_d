@@ -11,6 +11,7 @@ mod metadata;
 mod microsoft;
 mod modpack;
 mod modrinth;
+mod mods;
 mod version;
 
 use account::offline_uuid;
@@ -33,6 +34,7 @@ fn main() {
             cli::Command::Import(c) => run_import(&c),
             cli::Command::Login => run_login(),
             cli::Command::Logout => run_logout(),
+            cli::Command::Mods(c) => run_mods(&c),
         }
         return;
     }
@@ -59,6 +61,45 @@ fn run_logout() {
         Err(e) => {
             eprintln!("logout failed: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+fn run_mods(c: &cli::ModCli) {
+    let mc_dir = absolute_path(&c.mc_dir);
+    let result = match c.action {
+        cli::ModsAction::List => mods::list(&mc_dir, &c.instance).map(print_mods),
+        cli::ModsAction::Remove => mods::remove(&mc_dir, &c.instance, &c.mods)
+            .map(|count| println!("removed {count} mod(s)")),
+        cli::ModsAction::Toggle => c.mods.iter().try_for_each(|name| {
+            mods::toggle(&mc_dir, &c.instance, name).map(|_| ())
+        }),
+        cli::ModsAction::Update => mods::update(&mc_dir, &c.instance)
+            .map(|count| println!("updated {count} mod(s)")),
+    };
+
+    if let Err(e) = result {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+fn print_mods(entries: Vec<mods::ModEntry>) {
+    println!("{} mod(s):", entries.len());
+    for entry in entries {
+        let state = if entry.disabled {
+            "disabled"
+        } else {
+            "enabled"
+        };
+        let source = entry.source.as_deref().unwrap_or("unknown source");
+        if entry.version.is_empty() {
+            println!("{state} {} {} ({source})", entry.file, entry.id);
+        } else {
+            println!(
+                "{state} {} {} {} ({source})",
+                entry.file, entry.id, entry.version
+            );
         }
     }
 }

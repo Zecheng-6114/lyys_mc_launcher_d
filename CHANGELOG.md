@@ -9,6 +9,9 @@
 - 正版登录：微软设备码流程（XBL → XSTS → Minecraft），新增 `login` / `logout` 子命令，
   令牌自动续期；启动时已登录则自动使用正版身份，`--offline` / `--username` 可强制离线
 - 图形界面设置页新增账号区块：显示当前账号，支持发起登录与退出登录任务
+- 模组管理：新增 `mods list|remove|toggle|update` 子命令与实例设置页模组面板，
+  支持列出（jar 元数据解析 + Modrinth 来源识别）、启停（`.jar.disabled` 后缀）、
+  按名删除与 Modrinth 来源模组的一键批量更新
 
 ## [v0.0.2-alpha] - 2026-11-14
 

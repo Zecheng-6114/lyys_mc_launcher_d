@@ -12,6 +12,7 @@
   "instances.action.cancel": "取消",
   "instances.action.folder": "目录",
   "instances.action.settings": "设置",
+  "common.browse": "浏览…",
   "common.refresh": "刷新",
 
   "page.download.title": "下载",
@@ -63,6 +64,10 @@
   "instance_settings.instance": "实例",
   "instance_settings.override": "覆盖全局设置",
   "instance_settings.isolate.title": "版本隔离",
+  "instance_settings.mods.title": "模组",
+  "instance_settings.mods.empty": "未安装模组",
+  "instance_settings.mods.unknown": "未知来源",
+  "instance_settings.mods.remove": "删除",
   "instance_settings.save": "保存实例设置",
 
   "page.tasks.title": "任务",
@@ -82,6 +87,8 @@
   "task.title.add": "添加 {slug}",
   "task.title.login": "微软登录",
   "task.title.logout": "退出登录",
+  "task.title.mods_toggle": "{name} 模组启停",
+  "task.title.mods_remove": "删除 {name} 模组",
   "log.start_failed": "启动任务失败",
   "log.exit": "任务退出: {status}",
   "log.cancelled": "任务已取消",

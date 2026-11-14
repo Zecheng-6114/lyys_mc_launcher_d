@@ -12,6 +12,7 @@
   "instances.action.cancel": "キャンセル",
   "instances.action.folder": "フォルダ",
   "instances.action.settings": "設定",
+  "common.browse": "参照…",
   "common.refresh": "更新",
 
   "page.download.title": "ダウンロード",
@@ -63,6 +64,10 @@
   "instance_settings.instance": "インスタンス",
   "instance_settings.override": "グローバル設定を上書き",
   "instance_settings.isolate.title": "バージョン分離",
+  "instance_settings.mods.title": "Mod",
+  "instance_settings.mods.empty": "Modがインストールされていません",
+  "instance_settings.mods.unknown": "不明なソース",
+  "instance_settings.mods.remove": "削除",
   "instance_settings.save": "インスタンス設定を保存",
 
   "page.tasks.title": "タスク",
@@ -82,6 +87,8 @@
   "task.title.add": "{slug} を追加",
   "task.title.login": "Microsoft ログイン",
   "task.title.logout": "ログアウト",
+  "task.title.mods_toggle": "{name} Modの切り替え",
+  "task.title.mods_remove": "{name} Modを削除",
   "log.start_failed": "タスクの開始に失敗しました",
   "log.exit": "タスク終了: {status}",
   "log.cancelled": "タスクをキャンセルしました",

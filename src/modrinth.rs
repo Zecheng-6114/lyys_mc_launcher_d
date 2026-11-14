@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::download::{self, Origins};
 
@@ -162,6 +163,55 @@ pub fn install(
 fn project_title(project_id: &str) -> Option<String> {
     let project = download::get_json(&format!("{API}/project/{project_id}")).ok()?;
     project["title"].as_str().map(|title| title.to_string())
+}
+
+pub fn versions_by_hashes(hashes: &[String]) -> Result<HashMap<String, Value>, String> {
+    let mut versions = HashMap::new();
+    for chunk in hashes.chunks(100) {
+        let body = json!({ "hashes": chunk, "algorithm": "sha1" });
+        let (status, text) = download::post_json(&format!("{API}/version_files"), &body)?;
+        if status != 200 {
+            return Err(format!(
+                "modrinth: hash lookup failed (HTTP {status}): {text}"
+            ));
+        }
+        let found: HashMap<String, Value> = serde_json::from_str(&text)
+            .map_err(|e| format!("failed to parse hash lookup: {e}"))?;
+        versions.extend(found);
+    }
+    Ok(versions)
+}
+
+pub fn projects_by_ids(ids: &[String]) -> Result<Value, String> {
+    let mut projects = Vec::new();
+    for chunk in ids.chunks(100) {
+        let body =
+            download::get_json(&format!("{API}/projects?ids={}", encode(&array_json(chunk))))?;
+        if let Some(list) = body.as_array() {
+            projects.extend(list.iter().cloned());
+        }
+    }
+    Ok(Value::Array(projects))
+}
+
+pub fn update_versions(
+    hashes: &[String],
+    loaders: &[String],
+    game_versions: &[String],
+) -> Result<Value, String> {
+    let body = json!({
+        "hashes": hashes,
+        "algorithm": "sha1",
+        "loaders": loaders,
+        "game_versions": game_versions,
+    });
+    let (status, text) = download::post_json(&format!("{API}/version_files/update"), &body)?;
+    if status != 200 {
+        return Err(format!(
+            "modrinth: update check failed (HTTP {status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("failed to parse update response: {e}"))
 }
 
 pub fn download_modpack(
