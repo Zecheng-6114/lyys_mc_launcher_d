@@ -12,7 +12,7 @@
 - **版本安装**：一键安装原版，或叠加 Fabric / Forge / NeoForge 加载器
 - **版本继承链**：完整解析 `inheritsFrom` 依赖链并合并库与启动参数
 - **整合包导入**：支持 Modrinth（`.mrpack`）、CurseForge、MCBBS 与服务端整合包，支持 `--dry-run` 预览
-- **模组管理**：通过 Modrinth API 搜索并安装 mod，自动处理依赖（可选依赖可控）；支持列出、启停、删除已装模组，Modrinth 来源可一键更新
+- **模组管理**：通过 Modrinth API 搜索并安装 mod，自动处理依赖（可选依赖可控）；支持列出、启停与删除已装模组
 - **实例隔离**：每个实例可独立使用自己的 `versions/<实例>` 目录作为游戏目录
 - **镜像加速**：`--mirror` / `--maven` 可重写 Mojang 资源与 Maven 库下载源
 - **完整性校验**：下载文件带 SHA1 / SHA512 校验与重试
@@ -48,7 +48,7 @@ download: lyys_mc_launcher download --dir <game_dir> --version <version> [--load
 search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepack|shader|datapack> [--loader <a,b>] [--version <x,y>] [--limit <n>]
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
-mods:     lyys_mc_launcher mods list|remove|toggle|update --dir <game_dir> --name <instance> [--mod <id,file,...>]
+mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 ```
@@ -69,7 +69,7 @@ lyys_mc_launcher login
 # 从 Modrinth 导入整合包
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
 
-# 列出实例已装模组（remove / toggle / update 同理）
+# 列出实例已装模组（remove / toggle 同理）
 lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 ```
 
@@ -113,7 +113,7 @@ src/
 ├── installer.rs   # Forge 安装器 processor 执行
 ├── metadata.rs    # 加载器版本工件解析
 ├── modrinth.rs    # Modrinth 搜索与安装
-├── mods.rs        # 已装模组列出、启停、删除与更新
+├── mods.rs        # 已装模组列出、启停与删除
 ├── modpack.rs     # 整合包导入（modpack/ 为各 provider 实现）
 ├── instance.rs    # 实例配置与隔离
 ├── launch.rs      # 启动参数构建

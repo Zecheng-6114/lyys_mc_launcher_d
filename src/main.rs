@@ -74,8 +74,6 @@ fn run_mods(c: &cli::ModCli) {
         cli::ModsAction::Toggle => c.mods.iter().try_for_each(|name| {
             mods::toggle(&mc_dir, &c.instance, name).map(|_| ())
         }),
-        cli::ModsAction::Update => mods::update(&mc_dir, &c.instance)
-            .map(|count| println!("updated {count} mod(s)")),
     };
 
     if let Err(e) = result {

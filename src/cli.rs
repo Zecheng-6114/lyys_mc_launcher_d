@@ -15,7 +15,6 @@ pub enum ModsAction {
     List,
     Remove,
     Toggle,
-    Update,
 }
 
 pub struct ModCli {
@@ -87,7 +86,7 @@ const USAGE: &str = concat!(
     "  search: lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepack|shader|datapack> [--loader <a,b>] [--version <x,y>] [--limit <n>]\n",
     "  add:    lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--with-optional]\n",
     "  import: lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]\n",
-    "  mods:   lyys_mc_launcher mods list|remove|toggle|update --dir <game_dir> --name <instance> [--mod <id,file,...>]\n",
+    "  mods:   lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]\n",
     "  login:  lyys_mc_launcher login (Microsoft device code flow)\n",
     "  logout: lyys_mc_launcher logout",
 );
@@ -459,9 +458,8 @@ fn parse_mods(rest: &[String]) -> ModCli {
         Some("list") => ModsAction::List,
         Some("remove") => ModsAction::Remove,
         Some("toggle") => ModsAction::Toggle,
-        Some("update") => ModsAction::Update,
         _ => {
-            eprintln!("error: mods requires list, remove, toggle or update");
+            eprintln!("error: mods requires list, remove or toggle");
             eprintln!("{USAGE}");
             std::process::exit(1);
         }

@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use crate::download::{self, FileTask, Origins};
+use crate::download;
 use crate::installer;
 use crate::instance;
 use crate::loader;
 use crate::modrinth;
-use crate::version;
 
 const DISABLED_SUFFIX: &str = ".jar.disabled";
 const CACHE_FILE: &str = "mods-cache.json";
@@ -304,99 +303,6 @@ pub fn toggle(mc_dir: &str, instance: &str, name: &str) -> Result<bool, String> 
     println!("{state} {renamed}");
 
     Ok(!entry.disabled)
-}
-
-pub fn update(mc_dir: &str, instance: &str) -> Result<usize, String> {
-    let local = scan(mc_dir, instance)?;
-    let dir = mods_dir(mc_dir, instance);
-
-    let updatable: Vec<LocalEntry> = local
-        .iter()
-        .filter(|entry| !entry.disabled && entry.sha1.is_some())
-        .cloned()
-        .collect();
-    if updatable.is_empty() {
-        println!("no mods to update");
-        return Ok(0);
-    }
-
-    let info = version::instance_info(mc_dir, instance)?;
-    let loaders: Vec<String> = info.loader.into_iter().collect();
-    let hashes: Vec<String> = updatable
-        .iter()
-        .map(|entry| entry.sha1.clone().unwrap_or_default())
-        .collect();
-
-    let response = modrinth::update_versions(&hashes, &loaders, &[info.mc_version])?;
-
-    let mut tasks = Vec::new();
-    let mut plan: Vec<(String, String)> = Vec::new();
-    for entry in &updatable {
-        let hash = entry.sha1.as_deref().unwrap_or_default();
-        let Some(update) = response.get(hash) else {
-            println!("skipping {} (not on modrinth)", entry.file);
-            continue;
-        };
-        let files = update["files"].as_array().cloned().unwrap_or_default();
-        let file = files
-            .iter()
-            .find(|file| file["primary"].as_bool() == Some(true))
-            .or_else(|| files.first());
-        let Some(file) = file else {
-            println!("skipping {} (no update file)", entry.file);
-            continue;
-        };
-        let sha1 = file["hashes"]["sha1"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        if sha1.is_empty() || sha1 == hash {
-            println!("skipping {} (already latest)", entry.file);
-            continue;
-        }
-        let Some(url) = file["url"].as_str() else {
-            println!("skipping {} (no update url)", entry.file);
-            continue;
-        };
-        let Some(filename) = file["filename"].as_str() else {
-            println!("skipping {} (no update filename)", entry.file);
-            continue;
-        };
-        if filename.is_empty() || filename.contains(['/', '\\']) || filename.contains("..") {
-            return Err(format!("unsafe mod filename: {filename}"));
-        }
-
-        tasks.push(FileTask {
-            urls: vec![url.to_string()],
-            dest: dir.join(filename),
-            size: file["size"].as_u64(),
-            sha1: Some(sha1),
-            sha512: file["hashes"]["sha512"].as_str().map(str::to_string),
-        });
-        plan.push((entry.file.clone(), filename.to_string()));
-    }
-
-    if tasks.is_empty() {
-        println!("all mods up to date");
-        return Ok(0);
-    }
-
-    let plain = Origins {
-        mojang: None,
-        maven: None,
-    };
-    download::download_all(tasks, &plain)?;
-
-    for (old, new) in &plan {
-        if old != new {
-            let path = dir.join(old);
-            fs::remove_file(&path)
-                .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
-        }
-        println!("updated {old} -> {new}");
-    }
-
-    Ok(plan.len())
 }
 
 fn scan(mc_dir: &str, instance: &str) -> Result<Vec<LocalEntry>, String> {

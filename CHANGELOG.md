@@ -5,6 +5,9 @@
 
 ## [未发布]
 
+### 移除
+- 模组批量更新：移除 `mods update` 子命令及 Modrinth `/version_files/update` 接口
+
 ## [v0.0.3-alpha] - 2026-11-14
 
 ### 新增

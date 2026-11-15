@@ -12,7 +12,7 @@ Rust と GPUI で構築された Minecraft ランチャー。グラフィカル�
 - **バージョンインストール**：バニラをワンクリックでインストール、または Fabric / Forge / NeoForge ローダーを追加
 - **バージョン継承チェーン**：`inheritsFrom` チェーンを完全に解決し、ライブラリと起動引数をマージします
 - **統合パックのインポート**：Modrinth（`.mrpack`）、CurseForge、MCBBS、サーバー統合パックに対応。`--dry-run` によるプレビューも可能
-- **Mod 管理**：Modrinth API を通じて Mod を検索・インストールし、依存関係を自動処理（任意の依存関係は選択可能）；インストール済み Mod の一覧・切り替え・削除に対応し、Modrinth 提供の Mod はワンクリック更新可能
+- **Mod 管理**：Modrinth API を通じて Mod を検索・インストールし、依存関係を自動処理（任意の依存関係は選択可能）；インストール済み Mod の一覧・切り替え・削除に対応
 - **インスタンス分離**：各インスタンスは独自の `versions/<インスタンス>` ディレクトリをゲームディレクトリとして使用できます
 - **ミラー加速**：`--mirror` / `--maven` で Mojang リソースおよび Maven リポジトリのダウンロードソースを書き換え
 - **整合性チェック**：ダウンロードファイルは SHA1 / SHA512 検証とリトライ付き
@@ -48,7 +48,7 @@ download: lyys_mc_launcher download --dir <game_dir> --version <version> [--load
 search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepack|shader|datapack> [--loader <a,b>] [--version <x,y>] [--limit <n>]
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
-mods:     lyys_mc_launcher mods list|remove|toggle|update --dir <game_dir> --name <instance> [--mod <id,file,...>]
+mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 ```
@@ -69,7 +69,7 @@ lyys_mc_launcher login
 # Modrinth から統合パックをインポート
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
 
-# インスタンスのインストール済み Mod を一覧表示（remove / toggle / update も同様）
+# インスタンスのインストール済み Mod を一覧表示（remove / toggle も同様）
 lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 ```
 
@@ -113,7 +113,7 @@ src/
 ├── installer.rs   # Forge インストーラーのプロセッサ実行
 ├── metadata.rs    # ローダーバージョン成果物の解決
 ├── modrinth.rs    # Modrinth の検索とインストール
-├── mods.rs        # インストール済み Mod の一覧・切り替え・削除・更新
+├── mods.rs        # インストール済み Mod の一覧・切り替え・削除
 ├── modpack.rs     # 統合パックのインポート（modpack/ は各プロバイダーの実装）
 ├── instance.rs    # インスタンス設定と分離
 ├── launch.rs      # 起動引数の構築

@@ -194,26 +194,6 @@ pub fn projects_by_ids(ids: &[String]) -> Result<Value, String> {
     Ok(Value::Array(projects))
 }
 
-pub fn update_versions(
-    hashes: &[String],
-    loaders: &[String],
-    game_versions: &[String],
-) -> Result<Value, String> {
-    let body = json!({
-        "hashes": hashes,
-        "algorithm": "sha1",
-        "loaders": loaders,
-        "game_versions": game_versions,
-    });
-    let (status, text) = download::post_json(&format!("{API}/version_files/update"), &body)?;
-    if status != 200 {
-        return Err(format!(
-            "modrinth: update check failed (HTTP {status}): {text}"
-        ));
-    }
-    serde_json::from_str(&text).map_err(|e| format!("failed to parse update response: {e}"))
-}
-
 pub fn download_modpack(
     slug: &str,
     version_id: Option<&str>,
