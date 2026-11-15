@@ -48,6 +48,18 @@ jobs:
         if: runner.os == 'Linux'
         run: tar -czf lyys_mc_launcher-${{ github.ref_name }}-linux.tar.gz -C target/release lyys_mc_launcher
 
+      - name: 生成校验文件（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 lyys_mc_launcher-${{ github.ref_name }}-windows.zip |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content -Path lyys_mc_launcher-${{ github.ref_name }}-windows.zip.sha256 -Encoding ascii
+
+      - name: 生成校验文件（Linux）
+        if: runner.os == 'Linux'
+        run: sha256sum lyys_mc_launcher-${{ github.ref_name }}-linux.tar.gz > lyys_mc_launcher-${{ github.ref_name }}-linux.tar.gz.sha256
+
       - name: 读取更新日志
         shell: bash
         run: |
