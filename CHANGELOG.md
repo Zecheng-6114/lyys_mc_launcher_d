@@ -5,8 +5,13 @@
 
 ## [未发布]
 
+## [v0.0.4-alpha] - 2026-11-15
+
 ### 移除
 - 模组批量更新：移除 `mods update` 子命令及 Modrinth `/version_files/update` 接口
+
+### 修复
+- Linux 下图形界面无法显示：启用 `gpui-fast-platform` 的 wayland 与 x11 显示后端
 
 ## [v0.0.3-alpha] - 2026-11-14
 
@@ -65,7 +70,8 @@
 ### 修复
 - 适配 zip 9 API 并升级依赖
 
-[未发布]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.3-alpha...HEAD
+[未发布]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.4-alpha...HEAD
+[v0.0.4-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.3-alpha...v0.0.4-alpha
 [v0.0.3-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.2-alpha...v0.0.3-alpha
 [v0.0.2-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/compare/v0.0.1-alpha...v0.0.2-alpha
 [v0.0.1-alpha]: https://github.com/Zecheng-6114/lyys_mc_launcher/releases/tag/v0.0.1-alpha
