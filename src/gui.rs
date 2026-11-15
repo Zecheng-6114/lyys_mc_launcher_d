@@ -1249,11 +1249,17 @@ fn kill_tree(mut child: std::process::Child) {
     #[cfg(windows)]
     {
         let pid = child.id().to_string();
-        let _ = Command::new("taskkill")
+        let mut command = Command::new("taskkill");
+        command
             .args(["/PID", pid.as_str(), "/T", "/F"])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let _ = command.status();
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -1266,12 +1272,18 @@ fn execute(
     task: Arc<TaskHandle>,
     lang: Lang,
 ) -> bool {
-    let child = Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .args(&args)
         .env("LYYS_GUI", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let child = command.spawn();
     let Ok(mut child) = child else {
         let _ = tx.send_blocking(TaskEvent::Log(
             i18n::text(lang, "log.start_failed").to_string(),

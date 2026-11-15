@@ -40,9 +40,23 @@ fn main() {
         return;
     }
 
+    #[cfg(windows)]
+    hide_console();
+
     if let Err(error) = gui::run() {
         eprintln!("gui error: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
+fn hide_console() {
+    unsafe extern "system" {
+        fn FreeConsole() -> i32;
+    }
+
+    unsafe {
+        FreeConsole();
     }
 }
 
@@ -416,10 +430,14 @@ fn run_launch(c: &LaunchCli) {
 
     let args = build_args(mc_dir, version, &resolved.jar_id, &opts);
 
-    let status = std::process::Command::new(&java)
-        .args(&args)
-        .current_dir(&opts.game_dir)
-        .status();
+    let mut command = std::process::Command::new(&java);
+    command.args(&args).current_dir(&opts.game_dir);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let status = command.status();
 
     match status {
         Ok(status) if status.success() => {}
