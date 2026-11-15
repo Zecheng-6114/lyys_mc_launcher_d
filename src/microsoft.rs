@@ -128,6 +128,18 @@ pub fn login() -> Result<(), String> {
 
     println!("open {uri} in a browser and sign in with code: {user_code}");
 
+    if !user_code.is_empty() {
+        match copy_to_clipboard(&user_code) {
+            Ok(()) => println!("sign-in code copied to clipboard"),
+            Err(e) => println!("failed to copy code to clipboard: {e}"),
+        }
+    }
+
+    match open::that(&uri) {
+        Ok(()) => println!("opened {uri} in your default browser"),
+        Err(e) => println!("failed to open browser ({e}), open {uri} manually"),
+    }
+
     let msa = wait_for_token(&device_code, interval, expires_in)?;
     let account = minecraft_session(&msa.0, &msa.1)?;
     save_account(&account)?;
@@ -346,6 +358,16 @@ fn dashed_uuid(hex: &str) -> Result<String, String> {
         bytes[16..20].iter().collect::<String>(),
         bytes[20..32].iter().collect::<String>(),
     ))
+}
+
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("failed to set clipboard text: {e}"))?;
+    std::mem::forget(clipboard);
+    Ok(())
 }
 
 fn form(pairs: &[(&str, &str)]) -> String {
