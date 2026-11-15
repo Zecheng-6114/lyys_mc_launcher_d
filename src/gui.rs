@@ -25,6 +25,7 @@ use gpui_platform::application;
 use serde_json::{Value, json};
 use smol::channel;
 
+use crate::catalog::{self, GameVersion};
 use crate::i18n::{self, Lang};
 use crate::instance::{self, LaunchConfig};
 use crate::mods;
@@ -135,6 +136,14 @@ enum TaskState {
     Cancelled,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+enum LoadState {
+    Idle,
+    Loading,
+    Ready,
+    Failed(SharedString),
+}
+
 fn task_state_key(state: TaskState) -> &'static str {
     match state {
         TaskState::Running => "task.state.running",
@@ -204,6 +213,15 @@ pub struct LauncherUi {
     install_mirror_input: Entity<input::InputState>,
     install_maven_input: Entity<input::InputState>,
     install_isolate: bool,
+    install_versions: Vec<GameVersion>,
+    install_versions_state: LoadState,
+    install_version_picker: bool,
+    install_version_query: Entity<input::InputState>,
+    install_loader_versions: Vec<SharedString>,
+    install_loader_versions_state: LoadState,
+    install_loader_versions_key: Option<(String, String)>,
+    install_loader_picker: bool,
+    install_loader_query: Entity<input::InputState>,
 
     cfg_name: SharedString,
     cfg_username_input: Entity<input::InputState>,
@@ -294,6 +312,15 @@ impl LauncherUi {
             install_mirror_input: input(window, &settings.mirror.clone(), cx),
             install_maven_input: input(window, &settings.maven.clone(), cx),
             install_isolate: settings.isolate,
+            install_versions: Vec::new(),
+            install_versions_state: LoadState::Idle,
+            install_version_picker: false,
+            install_version_query: input(window, "", cx),
+            install_loader_versions: Vec::new(),
+            install_loader_versions_state: LoadState::Idle,
+            install_loader_versions_key: None,
+            install_loader_picker: false,
+            install_loader_query: input(window, "", cx),
 
             cfg_name: SharedString::default(),
             cfg_username_input: input(window, "", cx),
@@ -315,6 +342,19 @@ impl LauncherUi {
             mod_slug_input: input(window, "", cx),
             mod_instance_input: input(window, "", cx),
         };
+        for watched in [
+            &this.install_version_query,
+            &this.install_loader_query,
+            &this.install_version_input,
+            &this.install_loader_input,
+        ] {
+            cx.observe(watched, |this, _, cx| {
+                if this.install_version_picker || this.install_loader_picker {
+                    cx.notify();
+                }
+            })
+            .detach();
+        }
         this.reload(cx);
         this
     }
@@ -829,6 +869,133 @@ impl LauncherUi {
             save,
             cx,
         );
+    }
+
+    fn load_game_versions(&mut self, cx: &mut Context<Self>) {
+        if matches!(&self.install_versions_state, LoadState::Loading) {
+            return;
+        }
+
+        let mirror = Self::value(&self.install_mirror_input, cx);
+        let maven = Self::value(&self.install_maven_input, cx);
+        self.install_versions_state = LoadState::Loading;
+        cx.notify();
+
+        let task = cx.background_spawn(async move {
+            let origins = crate::download::Origins {
+                mojang: (!mirror.is_empty()).then_some(mirror.as_str()),
+                maven: (!maven.is_empty()).then_some(maven.as_str()),
+            };
+            catalog::game_versions(&origins)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(versions) => {
+                        this.install_versions = versions;
+                        this.install_versions_state = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        this.install_versions_state = LoadState::Failed(SharedString::from(error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn load_loader_versions(&mut self, cx: &mut Context<Self>) {
+        let loader = Self::value(&self.install_loader_input, cx);
+        let version = Self::value(&self.install_version_input, cx);
+        if loader.is_empty() || version.is_empty() {
+            self.install_loader_versions.clear();
+            self.install_loader_versions_key = None;
+            self.install_loader_versions_state = LoadState::Idle;
+            cx.notify();
+            return;
+        }
+
+        let key = (loader.clone(), version.clone());
+        if self.install_loader_versions_key.as_ref() == Some(&key)
+            && matches!(
+                &self.install_loader_versions_state,
+                LoadState::Loading | LoadState::Ready
+            )
+        {
+            return;
+        }
+
+        let mirror = Self::value(&self.install_mirror_input, cx);
+        let maven = Self::value(&self.install_maven_input, cx);
+        self.install_loader_versions.clear();
+        self.install_loader_versions_key = Some(key.clone());
+        self.install_loader_versions_state = LoadState::Loading;
+        cx.notify();
+
+        let task = cx.background_spawn(async move {
+            let origins = crate::download::Origins {
+                mojang: (!mirror.is_empty()).then_some(mirror.as_str()),
+                maven: (!maven.is_empty()).then_some(maven.as_str()),
+            };
+            catalog::loader_versions(&loader, &version, &origins)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.install_loader_versions_key.as_ref() != Some(&key) {
+                    return;
+                }
+
+                match result {
+                    Ok(versions) => {
+                        this.install_loader_versions =
+                            versions.into_iter().map(SharedString::from).collect();
+                        this.install_loader_versions_state = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        this.install_loader_versions_state =
+                            LoadState::Failed(SharedString::from(error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_version_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.install_version_picker = !self.install_version_picker;
+        Self::set_input(&self.install_version_query, "", window, cx);
+        if self.install_version_picker
+            && !matches!(
+                &self.install_versions_state,
+                LoadState::Loading | LoadState::Ready
+            )
+        {
+            self.load_game_versions(cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_loader_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.install_loader_picker = !self.install_loader_picker;
+        Self::set_input(&self.install_loader_query, "", window, cx);
+        if self.install_loader_picker {
+            self.load_loader_versions(cx);
+        }
+        cx.notify();
+    }
+
+    fn version_kind(&self, kind: &str) -> SharedString {
+        match kind {
+            "release" => self.t("version.type.release"),
+            "snapshot" => self.t("version.type.snapshot"),
+            "old_beta" => self.t("version.type.old_beta"),
+            "old_alpha" => self.t("version.type.old_alpha"),
+            _ => SharedString::from(kind.to_string()),
+        }
     }
 
     fn import_pack(&mut self, cx: &mut Context<Self>) {
@@ -1856,6 +2023,7 @@ impl LauncherUi {
                             "fabric",
                             current == "fabric",
                             self.mod_loader_input.clone(),
+                            false,
                             cx,
                         ))
                         .child(Self::loader_option(
@@ -1863,6 +2031,7 @@ impl LauncherUi {
                             "forge",
                             current == "forge",
                             self.mod_loader_input.clone(),
+                            false,
                             cx,
                         ))
                         .child(Self::loader_option(
@@ -1870,6 +2039,7 @@ impl LauncherUi {
                             "neoforge",
                             current == "neoforge",
                             self.mod_loader_input.clone(),
+                            false,
                             cx,
                         ))
                 } else if content_tab == 4 {
@@ -1885,6 +2055,7 @@ impl LauncherUi {
                             "iris",
                             current == "iris",
                             self.mod_loader_input.clone(),
+                            false,
                             cx,
                         ))
                         .child(Self::loader_option(
@@ -1892,6 +2063,7 @@ impl LauncherUi {
                             "optifine",
                             current == "optifine",
                             self.mod_loader_input.clone(),
+                            false,
                             cx,
                         ))
                 } else {
@@ -2060,6 +2232,7 @@ impl LauncherUi {
         value: &'static str,
         active: bool,
         target: Entity<input::InputState>,
+        refresh_install: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         div()
@@ -2076,8 +2249,16 @@ impl LauncherUi {
             })
             .when(!active, |this| this.text_color(skin::c(skin::MUTED)))
             .cursor(CursorStyle::PointingHand)
-            .on_click(cx.listener(move |_this, _event, window, cx| {
+            .on_click(cx.listener(move |this, _event, window, cx| {
                 Self::set_input(&target, if active { "" } else { value }, window, cx);
+                if refresh_install {
+                    this.install_loader_versions.clear();
+                    this.install_loader_versions_key = None;
+                    this.install_loader_versions_state = LoadState::Idle;
+                    if this.install_loader_picker {
+                        this.load_loader_versions(cx);
+                    }
+                }
                 cx.notify();
             }))
             .child(value)
@@ -2278,64 +2459,402 @@ impl LauncherUi {
             })
     }
 
-    fn render_install_form(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let loader = Self::value(&self.install_loader_input, cx);
-        v_flex()
-            .gap(px(16.))
-            .child(
-                panel()
-                    .child(
-                        row()
-                            .child(row_title(self.t("install.version.title")))
-                            .child(self.input_control(&self.install_version_input)),
-                    )
-                    .child(sep())
-                    .child(
-                        row()
-                            .child(row_title(self.t("install.name.title")))
-                            .child(self.input_control(&self.install_name_input)),
-                    )
-                    .child(sep())
-                    .child(
-                        row()
-                            .child(row_title(self.t("install.loader.title")))
+    fn render_version_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let query = Self::value(&self.install_version_query, cx).to_ascii_lowercase();
+        let filtered: Vec<&GameVersion> = self
+            .install_versions
+            .iter()
+            .filter(|version| {
+                query.is_empty()
+                    || version.id.to_ascii_lowercase().contains(&query)
+                    || version.kind.to_ascii_lowercase().contains(&query)
+            })
+            .collect();
+
+        let body: AnyElement = match &self.install_versions_state {
+            LoadState::Idle | LoadState::Loading => div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("install.version.loading"))
+                .into_any_element(),
+            LoadState::Failed(error) => v_flex()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .text_color(skin::c(skin::DANGER_FG))
+                        .child(self.t_args("install.version.error", &[("error", error.as_ref())])),
+                )
+                .child(
+                    text_button("install-version-retry", self.t("common.retry"))
+                        .on_click(cx.listener(|this, _, _, cx| this.load_game_versions(cx))),
+                )
+                .into_any_element(),
+            LoadState::Ready if filtered.is_empty() => div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("install.version.empty"))
+                .into_any_element(),
+            LoadState::Ready => {
+                let mut list = v_flex()
+                    .id("install-version-list")
+                    .max_h(px(240.))
+                    .overflow_y_scroll()
+                    .gap(px(1.));
+                for (index, version) in filtered.iter().enumerate() {
+                    let id = version.id.clone();
+                    let kind = self.version_kind(&version.kind);
+                    list = list.child(
+                        h_flex()
+                            .id(SharedString::from(format!("install-version-{index}")))
+                            .h(px(30.))
+                            .px(px(10.))
+                            .rounded(px(6.))
+                            .items_center()
+                            .justify_between()
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|style| style.bg(skin::c(skin::HOVER)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                Self::set_input(&this.install_version_input, &id, window, cx);
+                                this.install_version_picker = false;
+                                Self::set_input(&this.install_version_query, "", window, cx);
+                                this.install_loader_versions.clear();
+                                this.install_loader_versions_key = None;
+                                this.install_loader_versions_state = LoadState::Idle;
+                                if this.install_loader_picker {
+                                    this.load_loader_versions(cx);
+                                }
+                                cx.notify();
+                            }))
                             .child(
-                                h_flex()
-                                    .flex_shrink_0()
-                                    .gap(px(2.))
-                                    .p(px(3.))
-                                    .rounded(px(9.))
-                                    .bg(skin::c(skin::PANEL))
-                                    .child(Self::loader_option(
-                                        "install-loader-fabric",
-                                        "fabric",
-                                        loader == "fabric",
-                                        self.install_loader_input.clone(),
-                                        cx,
-                                    ))
-                                    .child(Self::loader_option(
-                                        "install-loader-forge",
-                                        "forge",
-                                        loader == "forge",
-                                        self.install_loader_input.clone(),
-                                        cx,
-                                    ))
-                                    .child(Self::loader_option(
-                                        "install-loader-neoforge",
-                                        "neoforge",
-                                        loader == "neoforge",
-                                        self.install_loader_input.clone(),
-                                        cx,
-                                    )),
+                                div()
+                                    .text_size(px(12.5))
+                                    .text_color(skin::c(skin::TEXT))
+                                    .child(version.id.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(skin::c(skin::FAINT))
+                                    .child(kind),
                             ),
-                    )
-                    .child(sep())
+                    );
+                }
+                list.into_any_element()
+            }
+        };
+
+        v_flex()
+            .gap(px(8.))
+            .px(px(20.))
+            .pb(px(14.))
+            .child(
+                v_flex()
+                    .gap(px(4.))
                     .child(
-                        row()
-                            .child(row_title(self.t("install.loader_version.title")))
-                            .child(self.input_control(&self.install_loader_version_input)),
+                        div()
+                            .text_size(px(11.))
+                            .text_color(skin::c(skin::FAINT))
+                            .child(self.t("install.version.search")),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(self.input_control(&self.install_version_query))
+                            .child(
+                                text_button("install-version-close", self.t("common.close"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.install_version_picker = false;
+                                        Self::set_input(
+                                            &this.install_version_query,
+                                            "",
+                                            window,
+                                            cx,
+                                        );
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
+            .child(body)
+            .into_any_element()
+    }
+
+    fn render_loader_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let loader = Self::value(&self.install_loader_input, cx);
+        let version = Self::value(&self.install_version_input, cx);
+        let missing = loader.is_empty() || version.is_empty();
+        let current_key = (loader, version);
+        let stale = self.install_loader_versions_key.as_ref() != Some(&current_key);
+        let query = Self::value(&self.install_loader_query, cx).to_ascii_lowercase();
+        let filtered: Vec<&SharedString> = self
+            .install_loader_versions
+            .iter()
+            .filter(|version| query.is_empty() || version.to_ascii_lowercase().contains(&query))
+            .collect();
+
+        let body: AnyElement = if missing {
+            div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("install.loader.missing"))
+                .into_any_element()
+        } else {
+            match &self.install_loader_versions_state {
+                LoadState::Idle | LoadState::Loading => div()
+                    .text_size(px(12.5))
+                    .text_color(skin::c(skin::MUTED))
+                    .child(self.t("install.loader.loading"))
+                    .into_any_element(),
+                LoadState::Failed(error) => v_flex()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .text_color(skin::c(skin::DANGER_FG))
+                            .child(
+                                self.t_args("install.loader.error", &[("error", error.as_ref())]),
+                            ),
+                    )
+                    .child(
+                        text_button("install-loader-retry", self.t("common.retry"))
+                            .on_click(cx.listener(|this, _, _, cx| this.load_loader_versions(cx))),
+                    )
+                    .into_any_element(),
+                LoadState::Ready if stale => v_flex()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .text_color(skin::c(skin::MUTED))
+                            .child(self.t("install.loader.changed")),
+                    )
+                    .child(
+                        text_button("install-loader-refresh", self.t("common.refresh"))
+                            .on_click(cx.listener(|this, _, _, cx| this.load_loader_versions(cx))),
+                    )
+                    .into_any_element(),
+                LoadState::Ready if filtered.is_empty() => div()
+                    .text_size(px(12.5))
+                    .text_color(skin::c(skin::MUTED))
+                    .child(self.t("install.loader.empty"))
+                    .into_any_element(),
+                LoadState::Ready => {
+                    let mut list = v_flex()
+                        .id("install-loader-list")
+                        .max_h(px(240.))
+                        .overflow_y_scroll()
+                        .gap(px(1.));
+
+                    if query.is_empty() {
+                        list = list.child(
+                            h_flex()
+                                .id("install-loader-latest")
+                                .h(px(30.))
+                                .px(px(10.))
+                                .rounded(px(6.))
+                                .items_center()
+                                .cursor(CursorStyle::PointingHand)
+                                .hover(|style| style.bg(skin::c(skin::HOVER)))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    Self::set_input(
+                                        &this.install_loader_version_input,
+                                        "",
+                                        window,
+                                        cx,
+                                    );
+                                    this.install_loader_picker = false;
+                                    Self::set_input(&this.install_loader_query, "", window, cx);
+                                    cx.notify();
+                                }))
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .text_color(skin::c(skin::MUTED))
+                                        .child(self.t("install.loader.latest")),
+                                ),
+                        );
+                    }
+
+                    for (index, version) in filtered.iter().enumerate() {
+                        let value = version.to_string();
+                        let picked = value.clone();
+                        list = list.child(
+                            h_flex()
+                                .id(SharedString::from(format!("install-loader-{index}")))
+                                .h(px(30.))
+                                .px(px(10.))
+                                .rounded(px(6.))
+                                .items_center()
+                                .cursor(CursorStyle::PointingHand)
+                                .hover(|style| style.bg(skin::c(skin::HOVER)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    Self::set_input(
+                                        &this.install_loader_version_input,
+                                        &picked,
+                                        window,
+                                        cx,
+                                    );
+                                    this.install_loader_picker = false;
+                                    Self::set_input(&this.install_loader_query, "", window, cx);
+                                    cx.notify();
+                                }))
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .text_color(skin::c(skin::TEXT))
+                                        .child(value),
+                                ),
+                        );
+                    }
+                    list.into_any_element()
+                }
+            }
+        };
+
+        v_flex()
+            .gap(px(8.))
+            .px(px(20.))
+            .pb(px(14.))
+            .child(
+                v_flex()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(skin::c(skin::FAINT))
+                            .child(self.t("install.loader.search")),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(self.input_control(&self.install_loader_query))
+                            .child(
+                                text_button("install-loader-close", self.t("common.close"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.install_loader_picker = false;
+                                        Self::set_input(&this.install_loader_query, "", window, cx);
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            )
+            .child(body)
+            .into_any_element()
+    }
+
+    fn render_install_form(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let loader = Self::value(&self.install_loader_input, cx);
+        let mut version_panel = panel().child(
+            row()
+                .child(row_title(self.t("install.version.title")))
+                .child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .gap(px(8.))
+                        .child(self.input_control(&self.install_version_input))
+                        .child(
+                            text_button(
+                                "install-version-list",
+                                if self.install_version_picker {
+                                    self.t("common.close")
+                                } else {
+                                    self.t("common.list")
+                                },
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.toggle_version_picker(window, cx),
+                            )),
+                        ),
+                ),
+        );
+
+        if self.install_version_picker {
+            version_panel = version_panel
+                .child(sep())
+                .child(self.render_version_picker(cx));
+        }
+
+        version_panel = version_panel
+            .child(sep())
+            .child(
+                row()
+                    .child(row_title(self.t("install.name.title")))
+                    .child(self.input_control(&self.install_name_input)),
+            )
+            .child(sep())
+            .child(
+                row()
+                    .child(row_title(self.t("install.loader.title")))
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .gap(px(2.))
+                            .p(px(3.))
+                            .rounded(px(9.))
+                            .bg(skin::c(skin::PANEL))
+                            .child(Self::loader_option(
+                                "install-loader-fabric",
+                                "fabric",
+                                loader == "fabric",
+                                self.install_loader_input.clone(),
+                                true,
+                                cx,
+                            ))
+                            .child(Self::loader_option(
+                                "install-loader-forge",
+                                "forge",
+                                loader == "forge",
+                                self.install_loader_input.clone(),
+                                true,
+                                cx,
+                            ))
+                            .child(Self::loader_option(
+                                "install-loader-neoforge",
+                                "neoforge",
+                                loader == "neoforge",
+                                self.install_loader_input.clone(),
+                                true,
+                                cx,
+                            )),
+                    ),
+            );
+
+        if self.install_loader_picker {
+            version_panel = version_panel
+                .child(sep())
+                .child(self.render_loader_picker(cx));
+        }
+
+        version_panel = version_panel.child(sep()).child(
+            row()
+                .child(row_title(self.t("install.loader_version.title")))
+                .child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .gap(px(8.))
+                        .child(self.input_control(&self.install_loader_version_input))
+                        .child(
+                            text_button(
+                                "install-loader-version-list",
+                                if self.install_loader_picker {
+                                    self.t("common.close")
+                                } else {
+                                    self.t("common.list")
+                                },
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.toggle_loader_picker(window, cx),
+                            )),
+                        ),
+                ),
+        );
+
+        v_flex()
+            .gap(px(16.))
+            .child(version_panel)
             .child(
                 panel()
                     .child(

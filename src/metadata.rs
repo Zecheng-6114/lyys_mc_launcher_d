@@ -199,6 +199,81 @@ fn latest_neoforge_version(versions: &[String], prefix: &str) -> Option<String> 
     })
 }
 
+pub fn forge_versions(mc_version: &str, origins: &Origins) -> Result<Vec<String>, String> {
+    let versions = fetch_versions(&format!("{FORGE_MAVEN}/maven-metadata.xml"), origins)?;
+    let versions = forge_versions_from(&versions, mc_version);
+    if versions.is_empty() {
+        return Err(format!("Forge does not support Minecraft {mc_version}"));
+    }
+    Ok(versions)
+}
+
+fn forge_versions_from(versions: &[String], mc_version: &str) -> Vec<String> {
+    let prefix = format!("{mc_version}-");
+    let mut result: Vec<String> = versions
+        .iter()
+        .filter(|candidate| candidate.starts_with(&prefix))
+        .map(|candidate| forge_loader_from_artifact(candidate, mc_version))
+        .collect();
+    sort_versions_desc(&mut result);
+    result
+}
+
+pub fn neoforge_versions(mc_version: &str, origins: &Origins) -> Result<Vec<String>, String> {
+    let old = mc_version == "1.20.1";
+    let (maven, mirror, prefix) = if old {
+        (
+            NEOFORGE_OLD_MAVEN,
+            NEOFORGE_OLD_MIRROR,
+            format!("{mc_version}-"),
+        )
+    } else {
+        (
+            NEOFORGE_MAVEN,
+            NEOFORGE_MIRROR,
+            neoforge_prefix(mc_version)?,
+        )
+    };
+
+    let versions = fetch_neoforge_versions(maven, mirror, origins)?;
+    let versions = neoforge_versions_from(&versions, &prefix, old);
+    if versions.is_empty() {
+        return Err(format!("no NeoForge version for Minecraft {mc_version}"));
+    }
+    Ok(versions)
+}
+
+fn neoforge_versions_from(versions: &[String], prefix: &str, old: bool) -> Vec<String> {
+    let mut result: Vec<String> = versions
+        .iter()
+        .filter(|candidate| neoforge_version_matches(candidate, prefix))
+        .map(|candidate| {
+            if old {
+                candidate
+                    .strip_prefix(prefix)
+                    .unwrap_or(candidate)
+                    .trim_start_matches('-')
+                    .to_string()
+            } else {
+                candidate.clone()
+            }
+        })
+        .collect();
+    sort_versions_desc(&mut result);
+    result
+}
+
+fn sort_versions_desc(versions: &mut Vec<String>) {
+    versions.sort_by(|left, right| {
+        let left_stable = !left.contains("alpha") && !left.contains("beta");
+        let right_stable = !right.contains("alpha") && !right.contains("beta");
+        right_stable
+            .cmp(&left_stable)
+            .then_with(|| compare_versions(right, left))
+    });
+    versions.dedup();
+}
+
 fn fetch_neoforge_versions(
     maven: &str,
     mirror: &str,
@@ -389,5 +464,46 @@ mod tests {
             "1.7.10-10.13.4.1614-1.7.10"
         );
         assert_eq!(forge_artifact("1.20.1", "47.2.0"), "1.20.1-47.2.0");
+    }
+
+    #[test]
+    fn forge_versions_filter_and_sort() {
+        let versions = vec![
+            String::from("1.21.1-52.0.1"),
+            String::from("1.20.1-47.2.0"),
+            String::from("1.21.1-52.0.2-beta"),
+            String::from("1.21.1-52.0.2"),
+        ];
+        assert_eq!(
+            forge_versions_from(&versions, "1.21.1"),
+            vec!["52.0.2", "52.0.1", "52.0.2-beta"]
+        );
+    }
+
+    #[test]
+    fn neoforge_versions_strip_legacy_prefix() {
+        let versions = vec![
+            String::from("1.20.1-47.1.106"),
+            String::from("1.20.1-47.1.105"),
+            String::from("1.20.1-47.1.106-beta"),
+        ];
+        assert_eq!(
+            neoforge_versions_from(&versions, "1.20.1-", true),
+            vec!["47.1.106", "47.1.105", "47.1.106-beta"]
+        );
+    }
+
+    #[test]
+    fn neoforge_versions_filter_modern_prefix() {
+        let versions = vec![
+            String::from("21.1.9"),
+            String::from("21.1.11-beta"),
+            String::from("21.1.10"),
+            String::from("21.2.1"),
+        ];
+        assert_eq!(
+            neoforge_versions_from(&versions, "21.1", false),
+            vec!["21.1.10", "21.1.9", "21.1.11-beta"]
+        );
     }
 }

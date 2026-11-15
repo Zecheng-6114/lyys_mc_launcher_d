@@ -1,4 +1,5 @@
 mod account;
+mod catalog;
 mod cli;
 mod download;
 mod gui;
