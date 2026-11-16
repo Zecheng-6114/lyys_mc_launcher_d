@@ -45,6 +45,7 @@
   "download.results.empty": "一致する結果はありません",
   "download.results.error": "検索に失敗しました：{error}",
   "download.results.downloads": "{count} ダウンロード",
+  "download.instance.pick": "インスタンスを選択",
 
   "page.settings.title": "設定",
   "settings.game_dir.title": "ゲームディレクトリ",

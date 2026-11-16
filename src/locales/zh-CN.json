@@ -45,6 +45,7 @@
   "download.results.empty": "没有匹配的结果",
   "download.results.error": "搜索失败：{error}",
   "download.results.downloads": "{count} 下载",
+  "download.instance.pick": "选择实例",
 
   "page.settings.title": "设置",
   "settings.game_dir.title": "游戏目录",

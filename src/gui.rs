@@ -246,6 +246,7 @@ pub struct LauncherUi {
     search_results: Vec<modrinth::Hit>,
     search_results_state: LoadState,
     search_results_key: Option<String>,
+    download_instance_picker: bool,
 }
 
 pub fn run() -> Result<(), Box<dyn Error>> {
@@ -348,6 +349,7 @@ impl LauncherUi {
             search_results: Vec::new(),
             search_results_state: LoadState::Idle,
             search_results_key: None,
+            download_instance_picker: false,
         };
         for watched in [
             &this.install_version_query,
@@ -364,6 +366,12 @@ impl LauncherUi {
         }
         cx.observe(&this.mod_slug_input, |this, _, cx| {
             if !matches!(this.search_results_state, LoadState::Idle) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.observe(&this.mod_instance_input, |this, _, cx| {
+            if this.download_instance_picker {
                 cx.notify();
             }
         })
@@ -1261,6 +1269,80 @@ impl LauncherUi {
             .child(sep())
             .child(body)
             .into_any_element()
+    }
+
+    fn toggle_download_instance_picker(&mut self, cx: &mut Context<Self>) {
+        self.download_instance_picker = !self.download_instance_picker;
+        if self.download_instance_picker {
+            let dir = Self::value(&self.dir_input, cx);
+            self.instances = list_instances(&dir);
+        }
+        cx.notify();
+    }
+
+    fn render_instance_options(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.instances.is_empty() {
+            return div()
+                .px(px(20.))
+                .py(px(14.))
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("instances.empty"))
+                .into_any_element();
+        }
+
+        let selected = Self::value(&self.mod_instance_input, cx);
+        let mut list = v_flex()
+            .id("download-instance-list")
+            .max_h(px(240.))
+            .overflow_y_scroll()
+            .gap(px(1.))
+            .px(px(10.))
+            .py(px(10.));
+        for (index, entry) in self.instances.clone().into_iter().enumerate() {
+            let name = entry.name.clone();
+            let pick_name = name.clone();
+            let meta = if entry.loader.is_empty() {
+                entry.version.clone()
+            } else {
+                SharedString::from(format!("{} · {}", entry.version, entry.loader))
+            };
+            let active = name == selected;
+            list = list.child(
+                h_flex()
+                    .id(SharedString::from(format!("download-instance-{index}")))
+                    .w_full()
+                    .px(px(10.))
+                    .py(px(7.))
+                    .rounded(px(6.))
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.))
+                    .cursor(CursorStyle::PointingHand)
+                    .when(active, |style| style.bg(skin::c(skin::ACTIVE)))
+                    .hover(|style| style.bg(skin::c(skin::HOVER)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        Self::set_input(&this.mod_instance_input, &pick_name, window, cx);
+                        this.download_instance_picker = false;
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_size(px(12.5))
+                            .text_color(skin::c(skin::TEXT))
+                            .child(name),
+                    )
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(11.))
+                            .text_color(skin::c(skin::FAINT))
+                            .child(meta),
+                    ),
+            );
+        }
+        list.into_any_element()
     }
 
     fn add_mod(&mut self, cx: &mut Context<Self>) {
@@ -2273,8 +2355,26 @@ impl LauncherUi {
                         .child(
                             row()
                                 .child(row_title(self.t("download.content.instance.title")))
-                                .child(self.input_control(&self.mod_instance_input)),
-                        ),
+                                .child(
+                                    h_flex()
+                                        .flex_shrink_0()
+                                        .items_center()
+                                        .gap(px(6.))
+                                        .child(self.input_control(&self.mod_instance_input))
+                                        .child(
+                                            text_button(
+                                                "pick-download-instance",
+                                                self.t("download.instance.pick"),
+                                            )
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_download_instance_picker(cx)
+                                            })),
+                                        ),
+                                ),
+                        )
+                        .when(self.download_instance_picker, |panel| {
+                            panel.child(sep()).child(self.render_instance_options(cx))
+                        }),
                 )
                 .child(h_flex().w_full().justify_end().child(
                     primary_button("add-run", self.t("download.content.add")).on_click(

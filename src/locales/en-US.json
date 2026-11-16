@@ -45,6 +45,7 @@
   "download.results.empty": "No matching results",
   "download.results.error": "Search failed: {error}",
   "download.results.downloads": "{count} downloads",
+  "download.instance.pick": "Pick instance",
 
   "page.settings.title": "Settings",
   "settings.game_dir.title": "Game directory",
