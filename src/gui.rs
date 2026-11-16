@@ -185,6 +185,7 @@ enum PathTarget {
 
 pub struct LauncherUi {
     tab: usize,
+    prev_tab: usize,
     instance_page: usize,
     download_tab: usize,
     lang: Lang,
@@ -296,6 +297,7 @@ impl LauncherUi {
 
         let mut this = LauncherUi {
             tab: 0,
+            prev_tab: 0,
             instance_page: 0,
             download_tab: 0,
             lang,
@@ -2418,7 +2420,12 @@ impl LauncherUi {
             .count();
         let mut button = text_button("nav-tasks", self.t("nav.tasks")).on_click(cx.listener(
             |this, _, _, cx| {
-                this.tab = 3;
+                if this.tab == 3 {
+                    this.tab = this.prev_tab;
+                } else {
+                    this.prev_tab = this.tab;
+                    this.tab = 3;
+                }
                 this.instance_page = 0;
                 cx.notify();
             },
