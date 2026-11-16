@@ -13,6 +13,7 @@ pub struct Hit {
     pub downloads: u64,
     pub description: String,
     pub project_type: String,
+    pub icon_url: String,
 }
 
 pub fn search(
@@ -51,6 +52,7 @@ pub fn search(
             downloads: hit["downloads"].as_u64().unwrap_or(0),
             description: hit["description"].as_str().unwrap_or_default().to_string(),
             project_type: hit["project_type"].as_str().unwrap_or_default().to_string(),
+            icon_url: hit["icon_url"].as_str().unwrap_or_default().to_string(),
         })
         .collect())
 }

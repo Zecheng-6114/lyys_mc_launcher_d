@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -10,9 +10,10 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, AppContext, Bounds, Context, CursorStyle, Div, ElementId, Entity, IntoElement,
-    ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString, Stateful, Styled, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, size,
+    AnyElement, App, AppContext, Bounds, Context, CursorStyle, Div, ElementId, Entity, Image,
+    ImageFormat, IntoElement, ObjectFit, ParentElement, PathPromptOptions, Render, ScrollHandle,
+    SharedString, Stateful, Styled, Window, WindowBounds, WindowOptions, div, img,
+    prelude::*, px, size,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Root, Sizable, StyledExt, TitleBar, h_flex, input,
@@ -223,6 +224,8 @@ pub struct LauncherUi {
     install_loader_versions_key: Option<(String, String)>,
     install_loader_picker: bool,
     install_loader_query: Entity<input::InputState>,
+    download_version_picker: bool,
+    download_version_query: Entity<input::InputState>,
 
     cfg_name: SharedString,
     cfg_username_input: Entity<input::InputState>,
@@ -246,6 +249,7 @@ pub struct LauncherUi {
     search_results: Vec<modrinth::Hit>,
     search_results_state: LoadState,
     search_results_key: Option<String>,
+    search_icons: HashMap<String, Arc<Image>>,
     download_instance_picker: bool,
 }
 
@@ -326,6 +330,8 @@ impl LauncherUi {
             install_loader_versions_key: None,
             install_loader_picker: false,
             install_loader_query: input(window, "", cx),
+            download_version_picker: false,
+            download_version_query: input(window, "", cx),
 
             cfg_name: SharedString::default(),
             cfg_username_input: input(window, "", cx),
@@ -349,6 +355,7 @@ impl LauncherUi {
             search_results: Vec::new(),
             search_results_state: LoadState::Idle,
             search_results_key: None,
+            search_icons: HashMap::new(),
             download_instance_picker: false,
         };
         for watched in [
@@ -364,6 +371,12 @@ impl LauncherUi {
             })
             .detach();
         }
+        cx.observe(&this.download_version_query, |this, _, cx| {
+            if this.download_version_picker {
+                cx.notify();
+            }
+        })
+        .detach();
         cx.observe(&this.mod_slug_input, |this, _, cx| {
             if !matches!(this.search_results_state, LoadState::Idle) {
                 cx.notify();
@@ -1000,6 +1013,20 @@ impl LauncherUi {
         cx.notify();
     }
 
+    fn toggle_download_version_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.download_version_picker = !self.download_version_picker;
+        Self::set_input(&self.download_version_query, "", window, cx);
+        if self.download_version_picker
+            && !matches!(
+                &self.install_versions_state,
+                LoadState::Loading | LoadState::Ready
+            )
+        {
+            self.load_game_versions(cx);
+        }
+        cx.notify();
+    }
+
     fn toggle_loader_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.install_loader_picker = !self.install_loader_picker;
         Self::set_input(&self.install_loader_query, "", window, cx);
@@ -1129,6 +1156,7 @@ impl LauncherUi {
         let limit: u32 = Self::value(&self.mod_limit_input, cx).parse().unwrap_or(10);
 
         self.search_results.clear();
+        self.search_icons.clear();
         self.search_results_key = Some(key.clone());
         self.search_results_state = LoadState::Loading;
         cx.notify();
@@ -1146,6 +1174,7 @@ impl LauncherUi {
                     Ok(hits) => {
                         this.search_results = hits;
                         this.search_results_state = LoadState::Ready;
+                        this.load_search_icons(cx);
                     }
                     Err(error) => {
                         this.search_results_state = LoadState::Failed(SharedString::from(error));
@@ -1155,6 +1184,33 @@ impl LauncherUi {
             });
         })
         .detach();
+    }
+
+    fn load_search_icons(&mut self, cx: &mut Context<Self>) {
+        let pending: Vec<(String, String)> = self
+            .search_results
+            .iter()
+            .filter(|hit| !hit.icon_url.is_empty() && !self.search_icons.contains_key(&hit.slug))
+            .map(|hit| (hit.slug.clone(), hit.icon_url.clone()))
+            .collect();
+
+        for (slug, url) in pending {
+            let task = cx.background_spawn(async move {
+                crate::download::get_bytes(&url)
+                    .ok()
+                    .map(|bytes| Arc::new(Image::from_bytes(image_format_from_url(&url), bytes)))
+            });
+            cx.spawn(async move |this, cx| {
+                let image = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(image) = image {
+                        this.search_icons.insert(slug, image);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
     }
 
     fn render_search_results(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1213,6 +1269,7 @@ impl LauncherUi {
                         &[("count", &hit.downloads.to_string())],
                     );
                     let active = !slug.is_empty() && slug == selected;
+                    let icon = search_icon_element(self, hit, &title);
                     list = list.child(
                         h_flex()
                             .id(SharedString::from(format!("search-result-{id_slug}")))
@@ -1230,6 +1287,7 @@ impl LauncherUi {
                                 Self::set_input(&this.mod_slug_input, &slug, window, cx);
                                 cx.notify();
                             }))
+                            .child(icon)
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -1632,6 +1690,64 @@ fn clip_text(text: &str, max: usize) -> String {
     }
     let clipped: String = trimmed.chars().take(max).collect();
     format!("{clipped}…")
+}
+
+fn search_icon_element(launcher: &LauncherUi, hit: &modrinth::Hit, title: &str) -> AnyElement {
+    let initial = SharedString::from(
+        title
+            .trim()
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| String::from("·")),
+    );
+
+    match launcher.search_icons.get(&hit.slug) {
+        Some(image) => img(image.clone())
+            .w(px(32.))
+            .h(px(32.))
+            .rounded(px(6.))
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Cover)
+            .with_loading({
+                let initial = initial.clone();
+                move || icon_placeholder(initial.clone()).into_any_element()
+            })
+            .with_fallback({
+                let initial = initial.clone();
+                move || icon_placeholder(initial.clone()).into_any_element()
+            })
+            .into_any_element(),
+        None => icon_placeholder(initial).into_any_element(),
+    }
+}
+
+fn icon_placeholder(initial: SharedString) -> Div {
+    div()
+        .w(px(32.))
+        .h(px(32.))
+        .rounded(px(6.))
+        .flex_shrink_0()
+        .bg(skin::c(skin::FIELD))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(13.))
+        .text_color(skin::c(skin::FAINT))
+        .child(initial)
+}
+
+fn image_format_from_url(url: &str) -> ImageFormat {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let ext = path.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => ImageFormat::Jpeg,
+        "webp" => ImageFormat::Webp,
+        "gif" => ImageFormat::Gif,
+        "bmp" => ImageFormat::Bmp,
+        "ico" => ImageFormat::Ico,
+        _ => ImageFormat::Png,
+    }
 }
 
 fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
@@ -2173,6 +2289,54 @@ impl LauncherUi {
         if self.download_tab == 0 {
             body = body.child(self.render_install_form(cx));
         } else if self.download_tab == 1 {
+            let mut pack_search = panel()
+                .child(
+                    row()
+                        .child(row_title(self.t("download.pack.query.title")))
+                        .child(self.input_control(&self.mod_query_input)),
+                )
+                .child(sep())
+                .child(
+                    row()
+                        .child(row_title(self.t("download.version.title")))
+                        .child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .gap(px(8.))
+                                .child(self.input_control(&self.mod_version_input))
+                                .child(
+                                    text_button(
+                                        "download-version-list",
+                                        if self.download_version_picker {
+                                            self.t("common.close")
+                                        } else {
+                                            self.t("common.list")
+                                        },
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_download_version_picker(window, cx)
+                                    })),
+                                ),
+                        ),
+                );
+            if self.download_version_picker {
+                pack_search = pack_search
+                    .child(sep())
+                    .child(self.render_version_picker_for(
+                        &self.mod_version_input,
+                        &self.download_version_query,
+                        "download-version-list",
+                        false,
+                        cx,
+                    ));
+            }
+            let pack_search = pack_search
+                .child(sep())
+                .child(
+                    row()
+                        .child(row_title(self.t("download.limit.title")))
+                        .child(self.input_control(&self.mod_limit_input)),
+                );
             body = body
                 .child(
                     panel()
@@ -2211,26 +2375,7 @@ impl LauncherUi {
                         cx.listener(|this, _, _, cx| this.import_pack(cx)),
                     ),
                 ))
-                .child(
-                    panel()
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.pack.query.title")))
-                                .child(self.input_control(&self.mod_query_input)),
-                        )
-                        .child(sep())
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.version.title")))
-                                .child(self.input_control(&self.mod_version_input)),
-                        )
-                        .child(sep())
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.limit.title")))
-                                .child(self.input_control(&self.mod_limit_input)),
-                        ),
-                )
+                .child(pack_search)
                 .child(h_flex().w_full().justify_end().child(
                     primary_button("pack-search-run", self.t("download.pack.search")).on_click(
                         cx.listener(|this, _, _, cx| this.search_mods(cx)),
@@ -2322,27 +2467,56 @@ impl LauncherUi {
                 };
                 search = search.child(sep()).child(row().child(label).child(control));
             }
-            body = body
+            let search = search
+                .child(sep())
                 .child(
-                    search
-                        .child(sep())
+                    row()
+                        .child(row_title(self.t("download.version.title")))
                         .child(
-                            row()
-                                .child(row_title(self.t("download.version.title")))
-                                .child(self.input_control(&self.mod_version_input)),
-                        )
-                        .child(sep())
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.limit.title")))
-                                .child(self.input_control(&self.mod_limit_input)),
+                            h_flex()
+                                .flex_shrink_0()
+                                .gap(px(8.))
+                                .child(self.input_control(&self.mod_version_input))
+                                .child(
+                                    text_button(
+                                        "download-version-list",
+                                        if self.download_version_picker {
+                                            self.t("common.close")
+                                        } else {
+                                            self.t("common.list")
+                                        },
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_download_version_picker(window, cx)
+                                    })),
+                                ),
                         ),
-                )
-                .child(h_flex().w_full().justify_end().child(
-                    primary_button("search-run", self.t("download.content.search")).on_click(
-                        cx.listener(|this, _, _, cx| this.search_mods(cx)),
-                    ),
-                ))
+                );
+            let search = if self.download_version_picker {
+                search
+                    .child(sep())
+                    .child(self.render_version_picker_for(
+                        &self.mod_version_input,
+                        &self.download_version_query,
+                        "download-version-list",
+                        false,
+                        cx,
+                    ))
+            } else {
+                search
+            };
+            let search = search
+                .child(sep())
+                .child(
+                    row()
+                        .child(row_title(self.t("download.limit.title")))
+                        .child(self.input_control(&self.mod_limit_input)),
+                );
+            body = body.child(search).child(h_flex().w_full().justify_end().child(
+                primary_button("search-run", self.t("download.content.search")).on_click(
+                    cx.listener(|this, _, _, cx| this.search_mods(cx)),
+                ),
+            ))
                 .child(self.render_search_results(cx))
                 .child(
                     panel()
@@ -2483,6 +2657,8 @@ impl LauncherUi {
                     this.search_results.clear();
                     this.search_results_state = LoadState::Idle;
                     this.search_results_key = None;
+                    this.download_version_picker = false;
+                    this.download_instance_picker = false;
                 }
                 this.download_tab = index;
                 if index == 2 {
@@ -2734,8 +2910,15 @@ impl LauncherUi {
             })
     }
 
-    fn render_version_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        let query = Self::value(&self.install_version_query, cx).to_ascii_lowercase();
+    fn render_version_picker_for(
+        &self,
+        target: &Entity<input::InputState>,
+        query_input: &Entity<input::InputState>,
+        list_id: &'static str,
+        install: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let query = Self::value(query_input, cx).to_ascii_lowercase();
         let filtered: Vec<&GameVersion> = self
             .install_versions
             .iter()
@@ -2745,6 +2928,9 @@ impl LauncherUi {
                     || version.kind.to_ascii_lowercase().contains(&query)
             })
             .collect();
+
+        let retry_id = SharedString::from(format!("{list_id}-retry"));
+        let close_id = SharedString::from(format!("{list_id}-close"));
 
         let body: AnyElement = match &self.install_versions_state {
             LoadState::Idle | LoadState::Loading => div()
@@ -2761,8 +2947,9 @@ impl LauncherUi {
                         .child(self.t_args("install.version.error", &[("error", error.as_ref())])),
                 )
                 .child(
-                    text_button("install-version-retry", self.t("common.retry"))
-                        .on_click(cx.listener(|this, _, _, cx| this.load_game_versions(cx))),
+                    text_button(retry_id, self.t("common.retry")).on_click(cx.listener(
+                        |this, _, _, cx| this.load_game_versions(cx),
+                    )),
                 )
                 .into_any_element(),
             LoadState::Ready if filtered.is_empty() => div()
@@ -2772,16 +2959,17 @@ impl LauncherUi {
                 .into_any_element(),
             LoadState::Ready => {
                 let mut list = v_flex()
-                    .id("install-version-list")
+                    .id(SharedString::from(format!("{list_id}-results")))
                     .max_h(px(240.))
                     .overflow_y_scroll()
                     .gap(px(1.));
                 for (index, version) in filtered.iter().enumerate() {
                     let id = version.id.clone();
                     let kind = self.version_kind(&version.kind);
+                    let target = target.clone();
                     list = list.child(
                         h_flex()
-                            .id(SharedString::from(format!("install-version-{index}")))
+                            .id(SharedString::from(format!("{list_id}-{index}")))
                             .h(px(30.))
                             .px(px(10.))
                             .rounded(px(6.))
@@ -2790,14 +2978,19 @@ impl LauncherUi {
                             .cursor(CursorStyle::PointingHand)
                             .hover(|style| style.bg(skin::c(skin::HOVER)))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                Self::set_input(&this.install_version_input, &id, window, cx);
-                                this.install_version_picker = false;
-                                Self::set_input(&this.install_version_query, "", window, cx);
-                                this.install_loader_versions.clear();
-                                this.install_loader_versions_key = None;
-                                this.install_loader_versions_state = LoadState::Idle;
-                                if this.install_loader_picker {
-                                    this.load_loader_versions(cx);
+                                Self::set_input(&target, &id, window, cx);
+                                if install {
+                                    this.install_version_picker = false;
+                                    Self::set_input(&this.install_version_query, "", window, cx);
+                                    this.install_loader_versions.clear();
+                                    this.install_loader_versions_key = None;
+                                    this.install_loader_versions_state = LoadState::Idle;
+                                    if this.install_loader_picker {
+                                        this.load_loader_versions(cx);
+                                    }
+                                } else {
+                                    this.download_version_picker = false;
+                                    Self::set_input(&this.download_version_query, "", window, cx);
                                 }
                                 cx.notify();
                             }))
@@ -2819,6 +3012,7 @@ impl LauncherUi {
             }
         };
 
+        let query_input = query_input.clone();
         v_flex()
             .gap(px(8.))
             .px(px(20.))
@@ -2836,19 +3030,19 @@ impl LauncherUi {
                         h_flex()
                             .items_center()
                             .gap(px(8.))
-                            .child(self.input_control(&self.install_version_query))
+                            .child(self.input_control(&query_input))
                             .child(
-                                text_button("install-version-close", self.t("common.close"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.install_version_picker = false;
-                                        Self::set_input(
-                                            &this.install_version_query,
-                                            "",
-                                            window,
-                                            cx,
-                                        );
+                                text_button(close_id, self.t("common.close")).on_click(
+                                    cx.listener(move |this, _, window, cx| {
+                                        if install {
+                                            this.install_version_picker = false;
+                                        } else {
+                                            this.download_version_picker = false;
+                                        }
+                                        Self::set_input(&query_input, "", window, cx);
                                         cx.notify();
-                                    })),
+                                    }),
+                                ),
                             ),
                     ),
             )
@@ -3049,7 +3243,13 @@ impl LauncherUi {
         if self.install_version_picker {
             version_panel = version_panel
                 .child(sep())
-                .child(self.render_version_picker(cx));
+                .child(self.render_version_picker_for(
+                    &self.install_version_input,
+                    &self.install_version_query,
+                    "install-version-list",
+                    true,
+                    cx,
+                ));
         }
 
         version_panel = version_panel

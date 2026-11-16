@@ -470,6 +470,21 @@ pub fn get_json(url: &str) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("failed to parse {url}: {e}"))
 }
 
+pub fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let resp = agent()
+        .get(url)
+        .call()
+        .map_err(|e| format!("request failed {url}: {e}"))?;
+
+    let mut bytes = Vec::new();
+    resp.into_body()
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read failed {url}: {e}"))?;
+
+    Ok(bytes)
+}
+
 pub fn get_json_with_headers(url: &str, headers: &[(&str, &str)]) -> Result<Value, String> {
     let mut request = agent().get(url);
     for (name, value) in headers {
