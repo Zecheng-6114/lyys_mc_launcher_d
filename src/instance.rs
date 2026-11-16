@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 pub const METADATA_FILE: &str = "lyys-instance.json";
 pub const LAUNCH_FILE: &str = "launch.json";
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct LaunchConfig {
     pub username: Option<String>,
     pub memory: Option<u32>,

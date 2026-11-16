@@ -241,6 +241,8 @@ pub struct LauncherUi {
     cfg_mirror_input: Entity<input::InputState>,
     cfg_maven_input: Entity<input::InputState>,
     cfg_isolate: bool,
+    cfg_isolate_local: bool,
+    cfg_saved: LaunchConfig,
     mods: Vec<mods::ModEntry>,
 
     import_file_input: Entity<input::InputState>,
@@ -359,6 +361,8 @@ impl LauncherUi {
             cfg_mirror_input: input(window, &settings.mirror.clone(), cx),
             cfg_maven_input: input(window, &settings.maven.clone(), cx),
             cfg_isolate: false,
+            cfg_isolate_local: false,
+            cfg_saved: LaunchConfig::default(),
             mods: Vec::new(),
 
             import_file_input: input(window, "", cx),
@@ -418,6 +422,15 @@ impl LauncherUi {
             &this.java_input,
             &this.mirror_input,
             &this.maven_input,
+        ] {
+            cx.observe(watched, |_, _, cx| cx.notify()).detach();
+        }
+        for watched in [
+            &this.cfg_username_input,
+            &this.cfg_memory_input,
+            &this.cfg_java_input,
+            &this.cfg_mirror_input,
+            &this.cfg_maven_input,
         ] {
             cx.observe(watched, |_, _, cx| cx.notify()).detach();
         }
@@ -1924,28 +1937,18 @@ impl LauncherUi {
         let config = instance::read_launch_config(&dir, name);
         self.cfg_name = SharedString::from(name.to_string());
 
-        let username = config
-            .username
-            .unwrap_or_else(|| Self::value(&self.username_input, cx));
-        Self::set_input(&self.cfg_username_input, &username, window, cx);
+        Self::set_input(&self.cfg_username_input, config.username.as_deref().unwrap_or(""), window, cx);
         let memory = config
             .memory
-            .unwrap_or_else(|| self.memory_value(&self.memory_input, cx).unwrap_or(4096))
-            .to_string();
+            .map(|value| value.to_string())
+            .unwrap_or_default();
         Self::set_input(&self.cfg_memory_input, &memory, window, cx);
-        let java = config
-            .java
-            .unwrap_or_else(|| Self::value(&self.java_input, cx));
-        Self::set_input(&self.cfg_java_input, &java, window, cx);
-        let mirror = config
-            .mirror
-            .unwrap_or_else(|| Self::value(&self.mirror_input, cx));
-        Self::set_input(&self.cfg_mirror_input, &mirror, window, cx);
-        let maven = config
-            .maven
-            .unwrap_or_else(|| Self::value(&self.maven_input, cx));
-        Self::set_input(&self.cfg_maven_input, &maven, window, cx);
+        Self::set_input(&self.cfg_java_input, config.java.as_deref().unwrap_or(""), window, cx);
+        Self::set_input(&self.cfg_mirror_input, config.mirror.as_deref().unwrap_or(""), window, cx);
+        Self::set_input(&self.cfg_maven_input, config.maven.as_deref().unwrap_or(""), window, cx);
         self.cfg_isolate = instance::is_isolated(&dir, name);
+        self.cfg_isolate_local = config.isolate.is_some();
+        self.cfg_saved = config;
 
         self.mods = Vec::new();
         self.load_mods(name, cx);
@@ -1954,24 +1957,35 @@ impl LauncherUi {
         cx.notify();
     }
 
+    fn cfg_current(&self, cx: &Context<Self>) -> LaunchConfig {
+        LaunchConfig {
+            username: non_empty(Self::value(&self.cfg_username_input, cx)),
+            memory: self.memory_value(&self.cfg_memory_input, cx),
+            java: non_empty(Self::value(&self.cfg_java_input, cx)),
+            mirror: non_empty(Self::value(&self.cfg_mirror_input, cx)),
+            maven: non_empty(Self::value(&self.cfg_maven_input, cx)),
+            isolate: if self.cfg_isolate_local {
+                Some(self.cfg_isolate)
+            } else {
+                None
+            },
+        }
+    }
+
     fn save_instance_settings(&mut self, cx: &mut Context<Self>) {
         let dir = Self::value(&self.dir_input, cx);
         let name = self.cfg_name.to_string();
         if dir.is_empty() || name.is_empty() {
             return;
         }
-        if Self::value(&self.cfg_memory_input, cx).is_empty() {
-            return;
-        }
+        let current = self.cfg_current(cx);
         let config = LaunchConfig {
-            username: Some(Self::value(&self.cfg_username_input, cx)),
-            memory: self.memory_value(&self.cfg_memory_input, cx),
-            java: Some(Self::value(&self.cfg_java_input, cx)),
-            mirror: Some(Self::value(&self.cfg_mirror_input, cx)),
-            maven: Some(Self::value(&self.cfg_maven_input, cx)),
             isolate: Some(self.cfg_isolate),
+            ..current
         };
         let _ = instance::write_launch_config(&dir, &name, &config);
+        self.cfg_isolate_local = true;
+        self.cfg_saved = config;
         self.load_mods(&name, cx);
         self.reload(cx);
     }
@@ -2155,6 +2169,14 @@ fn pump<R: Read + Send + 'static>(reader: R, tx: channel::Sender<TaskEvent>) {
             }
             Err(_) => break,
         }
+    }
+}
+
+fn non_empty(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
@@ -4148,6 +4170,14 @@ impl LauncherUi {
     }
 
     fn render_instance_settings_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let global_username = Self::value(&self.username_input, cx);
+        let global_memory = self
+            .memory_value(&self.memory_input, cx)
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let global_java = Self::value(&self.java_input, cx);
+        let global_mirror = Self::value(&self.mirror_input, cx);
+        let global_maven = Self::value(&self.maven_input, cx);
         v_flex()
             .size_full()
             .gap(px(20.))
@@ -4195,36 +4225,68 @@ impl LauncherUi {
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.username.title")))
-                                            .child(self.input_control(&self.cfg_username_input)),
-                                    )
-                                    .child(sep())
-                                    .child(
-                                        row()
-                                            .child(row_title(self.t("settings.memory.title")))
-                                            .child(self.input_control(&self.cfg_memory_input)),
-                                    )
-                                    .child(sep())
-                                    .child(
-                                        row()
-                                            .child(row_title(self.t("settings.java.title")))
-                                            .child(self.path_control(
-                                                &self.cfg_java_input,
-                                                "browse-cfg-java",
-                                                PathTarget::InstanceJava,
+                                            .child(self.cfg_override_control(
+                                                &self.cfg_username_input,
+                                                "cfg-reset-username",
+                                                global_username,
                                                 cx,
                                             )),
                                     )
                                     .child(sep())
                                     .child(
                                         row()
+                                            .child(row_title(self.t("settings.memory.title")))
+                                            .child(self.cfg_override_control(
+                                                &self.cfg_memory_input,
+                                                "cfg-reset-memory",
+                                                global_memory,
+                                                cx,
+                                            )),
+                                    )
+                                    .child(sep())
+                                    .child(
+                                        row()
+                                            .child(row_title(self.t("settings.java.title")))
+                                            .child(
+                                                h_flex()
+                                                    .flex_shrink_0()
+                                                    .items_center()
+                                                    .gap(px(8.))
+                                                    .child(self.path_control(
+                                                        &self.cfg_java_input,
+                                                        "browse-cfg-java",
+                                                        PathTarget::InstanceJava,
+                                                        cx,
+                                                    ))
+                                                    .child(self.cfg_source_badge(
+                                                        &self.cfg_java_input,
+                                                        "cfg-reset-java",
+                                                        global_java,
+                                                        cx,
+                                                    )),
+                                            ),
+                                    )
+                                    .child(sep())
+                                    .child(
+                                        row()
                                             .child(row_title(self.t("settings.mirror.title")))
-                                            .child(self.input_control(&self.cfg_mirror_input)),
+                                            .child(self.cfg_override_control(
+                                                &self.cfg_mirror_input,
+                                                "cfg-reset-mirror",
+                                                global_mirror,
+                                                cx,
+                                            )),
                                     )
                                     .child(sep())
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.maven.title")))
-                                            .child(self.input_control(&self.cfg_maven_input)),
+                                            .child(self.cfg_override_control(
+                                                &self.cfg_maven_input,
+                                                "cfg-reset-maven",
+                                                global_maven,
+                                                cx,
+                                            )),
                                     ),
                             )
                             .child(
@@ -4232,14 +4294,35 @@ impl LauncherUi {
                                     row()
                                         .child(row_title(self.t("instance_settings.isolate.title")))
                                         .child(
-                                            Switch::new("cfg-isolate")
-                                                .checked(self.cfg_isolate)
-                                                .on_click(cx.listener(
-                                                    |this, checked: &bool, _, cx| {
-                                                        this.cfg_isolate = *checked;
-                                                        cx.notify();
-                                                    },
-                                                )),
+                                            h_flex()
+                                                .flex_shrink_0()
+                                                .items_center()
+                                                .gap(px(8.))
+                                                .child(
+                                                    Switch::new("cfg-isolate")
+                                                        .checked(self.cfg_isolate)
+                                                        .on_click(cx.listener(
+                                                            |this, checked: &bool, _, cx| {
+                                                                this.cfg_isolate = *checked;
+                                                                this.cfg_isolate_local = true;
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(px(11.5))
+                                                        .text_color(skin::c(if self.cfg_isolate_local {
+                                                            skin::TEXT
+                                                        } else {
+                                                            skin::FAINT
+                                                        }))
+                                                        .child(if self.cfg_isolate_local {
+                                                            self.t("instance_settings.source.local")
+                                                        } else {
+                                                            self.t("instance_settings.source.unset")
+                                                        }),
+                                                ),
                                         ),
                                 ),
                             )
@@ -4251,11 +4334,13 @@ impl LauncherUi {
                     .w_full()
                     .flex_shrink_0()
                     .justify_end()
-                    .child(
+                    .child(if self.cfg_current(cx) == self.cfg_saved {
+                        disabled_button("cfg-save", self.t("instance_settings.save"))
+                    } else {
                         primary_button("cfg-save", self.t("instance_settings.save")).on_click(
                             cx.listener(|this, _, _, cx| this.save_instance_settings(cx)),
-                        ),
-                    ),
+                        )
+                    }),
             )
     }
 
@@ -4277,6 +4362,72 @@ impl LauncherUi {
                     }),
                 ),
             )
+    }
+
+    fn cfg_override_control(
+        &self,
+        state: &Entity<input::InputState>,
+        reset_id: &'static str,
+        global: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let input = self.input_control(state);
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(8.))
+            .child(input)
+            .child(self.cfg_source_badge(state, reset_id, global, cx))
+    }
+
+    fn cfg_source_badge(
+        &self,
+        state: &Entity<input::InputState>,
+        reset_id: &'static str,
+        global: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let local = !Self::value(state, cx).is_empty();
+        let label = if local {
+            self.t("instance_settings.source.local")
+        } else {
+            self.t("instance_settings.source.global")
+        };
+        let fallback: SharedString = if global.is_empty() {
+            self.t("instance_settings.source.unset")
+        } else {
+            global.into()
+        };
+        let reset_label = self.t("instance_settings.reset");
+        let state = state.clone();
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .text_color(skin::c(if local { skin::TEXT } else { skin::FAINT }))
+                    .child(label),
+            )
+            .when(!local, |this| {
+                this.child(
+                    div()
+                        .max_w(px(160.))
+                        .truncate()
+                        .text_size(px(11.5))
+                        .text_color(skin::c(skin::FAINT))
+                        .child(fallback),
+                )
+            })
+            .when(local, |this| {
+                this.child(text_button(reset_id, reset_label).on_click(cx.listener(
+                    move |_, _, window, cx| {
+                        Self::set_input(&state, "", window, cx);
+                        cx.notify();
+                    },
+                )))
+            })
     }
 
     fn input_control(&self, state: &Entity<input::InputState>) -> impl IntoElement {
