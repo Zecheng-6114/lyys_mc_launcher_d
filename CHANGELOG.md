@@ -5,6 +5,13 @@
 
 ## [未发布]
 
+### 新增
+- 启动、Forge/NeoForge 安装与整合包导入在未指定 Java 时自动探测本机 Java，并按实例所需版本选择运行环境
+- 新增 `java list` / `java path --version <mc_version>` 子命令，用于查看已探测的 Java 与按版本选择结果
+- 设置页 Java 路径支持自动检测并列出本机 Java；实例设置页显示所需 Java 版本并支持一键按版本选择
+- Java 探测支持添加自定义扫描目录（`user_java`、`java add|remove --path`），含多个 JDK 的父目录可一次添加
+- Java 探测缓存改为按可执行文件与 `release` 文件指纹校验，JDK 更新后自动失效
+
 ## [v0.0.5-alpha] - 2026-11-16
 
 ### 新增

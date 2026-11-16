@@ -14,6 +14,7 @@
 - **整合包导入**：支持 Modrinth（`.mrpack`）、CurseForge、MCBBS 与服务端整合包，支持 `--dry-run` 预览
 - **模组管理**：通过 Modrinth API 搜索并安装 mod，自动处理依赖（可选依赖可控）；支持列出、启停与删除已装模组
 - **实例隔离**：每个实例可独立使用自己的 `versions/<实例>` 目录作为游戏目录
+- **Java 探测**：自动扫描本机 Java，支持添加自定义扫描目录，按实例所需版本选择运行环境；`java list` / `java path` / `java add` 可查看与维护结果
 - **镜像加速**：`--mirror` / `--maven` 可重写 Mojang 资源与 Maven 库下载源
 - **完整性校验**：下载文件带 SHA1 / SHA512 校验与重试
 - **离线启动**：由用户名派生离线 UUID
@@ -50,6 +51,7 @@ search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepac
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--version <id|number>] [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
+java:     lyys_mc_launcher java list [--refresh] | java path --version <mc_version> | java add|remove --path <path>
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
@@ -79,6 +81,13 @@ lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
 
 # 列出实例已装模组（remove / toggle 同理）
 lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
+
+# 列出已探测的 Java，或按游戏版本选择 Java
+lyys_mc_launcher java list
+lyys_mc_launcher java path --version 1.20.1
+
+# 添加自定义目录（含多个 JDK 的父目录也可），之后自动检测会一并扫描
+lyys_mc_launcher java add --path D:\tools\java
 ```
 
 ## 配置
@@ -95,6 +104,7 @@ lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 | `maven` | Maven 库镜像 |
 | `isolate` | 是否默认开启实例隔离 |
 | `language` | 界面语言（`zh-CN` / `en-US` / `ja-JP`） |
+| `user_java` | 手动添加的 Java 扫描路径（可执行文件、Java 主目录或包含多个 JDK 的父目录） |
 
 基目录的确定规则：从可执行文件所在目录逐级向上查找包含 `Cargo.toml` 的目录；开发环境即为项目根目录，否则使用当前工作目录。
 

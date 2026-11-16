@@ -181,6 +181,7 @@ enum PathTarget {
     InstanceJava,
     InstallJava,
     ImportFile,
+    ScanJavaDir,
 }
 
 pub struct LauncherUi {
@@ -242,7 +243,12 @@ pub struct LauncherUi {
     cfg_maven_input: Entity<input::InputState>,
     cfg_isolate: bool,
     cfg_isolate_local: bool,
+    cfg_java_required: Option<u32>,
+    cfg_java_note: Option<SharedString>,
     cfg_saved: LaunchConfig,
+    java_runtimes: Vec<crate::java::JavaRuntime>,
+    java_runtimes_state: LoadState,
+    java_picker: bool,
     mods: Vec<mods::ModEntry>,
 
     import_file_input: Entity<input::InputState>,
@@ -362,7 +368,12 @@ impl LauncherUi {
             cfg_maven_input: input(window, &settings.maven.clone(), cx),
             cfg_isolate: false,
             cfg_isolate_local: false,
+            cfg_java_required: None,
+            cfg_java_note: None,
             cfg_saved: LaunchConfig::default(),
+            java_runtimes: Vec::new(),
+            java_runtimes_state: LoadState::Idle,
+            java_picker: false,
             mods: Vec::new(),
 
             import_file_input: input(window, "", cx),
@@ -496,6 +507,7 @@ impl LauncherUi {
         if let Some(language) = &self.language {
             value["language"] = json!(language.to_string());
         }
+        value["user_java"] = json!(crate::java::user_paths());
         value
     }
 
@@ -891,6 +903,33 @@ impl LauncherUi {
     }
 
     fn pick_path(&mut self, target: PathTarget, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(target, PathTarget::ScanJavaDir) {
+            let options = PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some(self.t("settings.java.scan_dir")),
+            };
+            let receiver = cx.prompt_for_paths(options);
+            cx.spawn_in(window, async move |weak, cx| {
+                let Ok(Ok(Some(paths))) = receiver.await else {
+                    return;
+                };
+                let Some(path) = paths.first() else {
+                    return;
+                };
+                let value = path.to_string_lossy().to_string();
+                if let Err(error) = crate::java::add_user_path(&value) {
+                    eprintln!("error: {error}");
+                    return;
+                }
+                weak.update_in(cx, |this, window, cx| this.detect_java(window, cx))
+                    .ok();
+            })
+            .detach();
+            return;
+        }
+
         let (entity, directories, title) = match target {
             PathTarget::GameDir => (self.dir_input.clone(), true, "settings.game_dir.title"),
             PathTarget::Java => (self.java_input.clone(), true, "settings.java.title"),
@@ -903,6 +942,7 @@ impl LauncherUi {
                     "download.import.file.title",
                 )
             }
+            PathTarget::ScanJavaDir => return,
         };
         let options = PathPromptOptions {
             files: !directories,
@@ -1948,6 +1988,10 @@ impl LauncherUi {
         Self::set_input(&self.cfg_maven_input, config.maven.as_deref().unwrap_or(""), window, cx);
         self.cfg_isolate = instance::is_isolated(&dir, name);
         self.cfg_isolate_local = config.isolate.is_some();
+        self.cfg_java_required = crate::version::resolve(&dir, name)
+            .ok()
+            .map(|resolved| crate::java::required_major_for_version(&resolved.json));
+        self.cfg_java_note = None;
         self.cfg_saved = config;
 
         self.mods = Vec::new();
@@ -1988,6 +2032,140 @@ impl LauncherUi {
         self.cfg_saved = config;
         self.load_mods(&name, cx);
         self.reload(cx);
+    }
+
+    fn detect_java(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.java_runtimes_state = LoadState::Loading;
+        self.java_picker = true;
+        cx.notify();
+
+        let task = cx.background_spawn(async move { crate::java::detect(true) });
+        cx.spawn_in(window, async move |view, cx| {
+            let runtimes = task.await;
+            view.update_in(cx, |this, _window, cx| {
+                this.java_runtimes = runtimes;
+                this.java_runtimes_state = LoadState::Ready;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn pick_java_runtime(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(runtime) = self.java_runtimes.get(index).cloned() else {
+            return;
+        };
+        Self::set_input(&self.java_input, &runtime.path, window, cx);
+        self.java_picker = false;
+        self.save_settings(cx);
+    }
+
+    fn render_java_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let body: AnyElement = match &self.java_runtimes_state {
+            LoadState::Idle | LoadState::Loading => div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("settings.java.detecting"))
+                .into_any_element(),
+            LoadState::Failed(error) => div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::DANGER_FG))
+                .child(error.clone())
+                .into_any_element(),
+            LoadState::Ready if self.java_runtimes.is_empty() => div()
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("settings.java.none"))
+                .into_any_element(),
+            LoadState::Ready => v_flex()
+                .gap(px(4.))
+                .children(
+                    self.java_runtimes
+                        .iter()
+                        .enumerate()
+                        .map(|(index, runtime)| {
+                            h_flex()
+                                .id(("java-runtime", index))
+                                .w_full()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(12.))
+                                .px(px(10.))
+                                .py(px(7.))
+                                .rounded(px(7.))
+                                .cursor_pointer()
+                                .hover(|style| style.bg(skin::c(skin::ACTIVE)))
+                                .child(
+                                    h_flex()
+                                        .flex_shrink_0()
+                                        .gap(px(8.))
+                                        .child(
+                                            div()
+                                                .text_size(px(12.5))
+                                                .text_color(skin::c(skin::TEXT))
+                                                .child(format!("Java {}", runtime.major)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(11.5))
+                                                .text_color(skin::c(skin::FAINT))
+                                                .child(runtime.arch.clone()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(px(11.5))
+                                        .text_color(skin::c(skin::MUTED))
+                                        .child(runtime.path.clone()),
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.pick_java_runtime(index, window, cx);
+                                }))
+                        }),
+                )
+                .into_any_element(),
+        };
+
+        v_flex()
+            .px(px(20.))
+            .pb(px(12.))
+            .gap(px(6.))
+            .child(body)
+            .into_any_element()
+    }
+
+    fn auto_select_instance_java(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(required) = self.cfg_java_required else {
+            return;
+        };
+
+        let task = cx.background_spawn(async move {
+            let runtimes = crate::java::detect(false);
+            crate::java::select(&runtimes, required).map(|runtime| runtime.path.clone())
+        });
+        cx.spawn_in(window, async move |view, cx| {
+            let picked = task.await;
+            view.update_in(cx, |this, window, cx| {
+                match picked {
+                    Some(path) => {
+                        Self::set_input(&this.cfg_java_input, &path, window, cx);
+                        this.cfg_java_note = None;
+                    }
+                    None => {
+                        let major = required.to_string();
+                        this.cfg_java_note = Some(
+                            this.t_args("settings.java.auto_failed", &[("major", &major)]),
+                        );
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
@@ -3513,13 +3691,50 @@ impl LauncherUi {
                                     .child(
                                         row()
                                             .child(row_title(self.t("settings.java.title")))
-                                            .child(self.path_control(
-                                                &self.java_input,
-                                                "browse-java",
-                                                PathTarget::Java,
-                                                cx,
-                                            )),
+                                            .child(
+                                                h_flex()
+                                                    .flex_shrink_0()
+                                                    .items_center()
+                                                    .gap(px(8.))
+                                                    .child(self.path_control(
+                                                        &self.java_input,
+                                                        "browse-java",
+                                                        PathTarget::Java,
+                                                        cx,
+                                                    ))
+                                                    .child(
+                                                        text_button(
+                                                            "detect-java",
+                                                            self.t("settings.java.detect"),
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            |this, _, window, cx| {
+                                                                this.detect_java(window, cx)
+                                                            },
+                                                        )),
+                                                    )
+                                                    .child(
+                                                        text_button(
+                                                            "scan-java-dir",
+                                                            self.t("settings.java.scan_dir"),
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            |this, _, window, cx| {
+                                                                this.pick_path(
+                                                                    PathTarget::ScanJavaDir,
+                                                                    window,
+                                                                    cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                    ),
+                                            ),
                                     )
+                                    .when(self.java_picker, |panel| {
+                                        panel
+                                            .child(sep())
+                                            .child(self.render_java_picker(cx))
+                                    })
                                     .child(sep())
                                     .child(
                                         row()
@@ -4178,6 +4393,12 @@ impl LauncherUi {
         let global_java = Self::value(&self.java_input, cx);
         let global_mirror = Self::value(&self.mirror_input, cx);
         let global_maven = Self::value(&self.maven_input, cx);
+        let java_required_note = self.cfg_java_required.map(|required| {
+            self.t_args(
+                "settings.java.required",
+                &[("major", &required.to_string())],
+            )
+        });
         v_flex()
             .size_full()
             .gap(px(20.))
@@ -4246,7 +4467,43 @@ impl LauncherUi {
                                     .child(sep())
                                     .child(
                                         row()
-                                            .child(row_title(self.t("settings.java.title")))
+                                            .child(
+                                                v_flex()
+                                                    .gap(px(2.))
+                                                    .child(row_title(self.t("settings.java.title")))
+                                                    .when(
+                                                        self.cfg_java_note.is_some(),
+                                                        |column| {
+                                                            column.child(
+                                                                div()
+                                                                    .text_size(px(11.5))
+                                                                    .text_color(skin::c(
+                                                                        skin::DANGER_FG,
+                                                                    ))
+                                                                    .child(
+                                                                        self.cfg_java_note
+                                                                            .clone()
+                                                                            .unwrap_or_default(),
+                                                                    ),
+                                                            )
+                                                        },
+                                                    )
+                                                    .when(
+                                                        java_required_note.is_some(),
+                                                        |column| {
+                                                            column.child(
+                                                                div()
+                                                                    .text_size(px(11.5))
+                                                                    .text_color(skin::c(skin::FAINT))
+                                                                    .child(
+                                                                        java_required_note
+                                                                            .clone()
+                                                                            .unwrap_or_default(),
+                                                                    ),
+                                                            )
+                                                        },
+                                                    ),
+                                            )
                                             .child(
                                                 h_flex()
                                                     .flex_shrink_0()
@@ -4263,7 +4520,20 @@ impl LauncherUi {
                                                         "cfg-reset-java",
                                                         global_java,
                                                         cx,
-                                                    )),
+                                                    ))
+                                                    .child(
+                                                        text_button(
+                                                            "cfg-auto-java",
+                                                            self.t("settings.java.auto"),
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            |this, _, window, cx| {
+                                                                this.auto_select_instance_java(
+                                                                    window, cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                    ),
                                             ),
                                     )
                                     .child(sep())

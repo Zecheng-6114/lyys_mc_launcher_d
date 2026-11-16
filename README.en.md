@@ -14,6 +14,7 @@ A Minecraft launcher built with Rust and GPUI, offering both a graphical interfa
 - **Modpack import**: supports Modrinth (`.mrpack`), CurseForge, MCBBS, and server modpacks, with `--dry-run` preview
 - **Mod management**: search and install mods via the Modrinth API, with automatic dependency handling (optional dependencies under your control); list, toggle, and remove installed mods
 - **Instance isolation**: each instance can use its own `versions/<instance>` directory as the game directory
+- **Java detection**: scans installed Java runtimes, supports custom scan folders, and picks one matching the instance requirement; `java list` / `java path` / `java add` expose and manage the result
 - **Mirror acceleration**: `--mirror` / `--maven` rewrite Mojang resource and Maven repository download sources
 - **Integrity checks**: downloads are verified with SHA1 / SHA512 and retried on failure
 - **Offline play**: derives an offline UUID from the username
@@ -50,6 +51,7 @@ search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepac
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--version <id|number>] [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
+java:     lyys_mc_launcher java list [--refresh] | java path --version <mc_version> | java add|remove --path <path>
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
@@ -79,6 +81,13 @@ lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
 
 # List installed mods of an instance (remove / toggle likewise)
 lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
+
+# List detected Java runtimes, or pick one for a game version
+lyys_mc_launcher java list
+lyys_mc_launcher java path --version 1.20.1
+
+# Add a custom folder (a parent folder containing several JDKs also works)
+lyys_mc_launcher java add --path D:\tools\java
 ```
 
 ## Configuration
@@ -95,6 +104,7 @@ The global configuration is located at `<base dir>/lyys_mc_launcher/config.json`
 | `maven` | Mirror for Maven repositories |
 | `isolate` | Whether instance isolation is enabled by default |
 | `language` | Interface language (`zh-CN` / `en-US` / `ja-JP`) |
+| `user_java` | Manually added Java scan paths (executable, Java home or a parent folder containing several JDKs) |
 
 The base directory is resolved as follows: starting from the directory containing the executable, walk up until a directory that contains `Cargo.toml` is found; in a development environment this is the project root, otherwise the current working directory is used.
 

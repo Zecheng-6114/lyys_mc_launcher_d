@@ -14,6 +14,7 @@ Rust と GPUI で構築された Minecraft ランチャー。グラフィカル�
 - **統合パックのインポート**：Modrinth（`.mrpack`）、CurseForge、MCBBS、サーバー統合パックに対応。`--dry-run` によるプレビューも可能
 - **Mod 管理**：Modrinth API を通じて Mod を検索・インストールし、依存関係を自動処理（任意の依存関係は選択可能）；インストール済み Mod の一覧・切り替え・削除に対応
 - **インスタンス分離**：各インスタンスは独自の `versions/<インスタンス>` ディレクトリをゲームディレクトリとして使用できます
+- **Java 検出**：インストール済みの Java を検出し、カスタムフォルダの追加にも対応。インスタンスの必要バージョンに合うものを選択。`java list` / `java path` / `java add` で確認・管理できます
 - **ミラー加速**：`--mirror` / `--maven` で Mojang リソースおよび Maven リポジトリのダウンロードソースを書き換え
 - **整合性チェック**：ダウンロードファイルは SHA1 / SHA512 検証とリトライ付き
 - **オフライン起動**：ユーザー名からオフライン UUID を生成
@@ -50,6 +51,7 @@ search:   lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepac
 add:      lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--version <id|number>] [--with-optional]
 import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
+java:     lyys_mc_launcher java list [--refresh] | java path --version <mc_version> | java add|remove --path <path>
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
 account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
@@ -79,6 +81,13 @@ lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
 
 # インスタンスのインストール済み Mod を一覧表示（remove / toggle も同様）
 lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
+
+# 検出した Java の一覧、またはゲームバージョンに合う Java の選択
+lyys_mc_launcher java list
+lyys_mc_launcher java path --version 1.20.1
+
+# カスタムフォルダを追加（複数の JDK を含む親フォルダでも可）
+lyys_mc_launcher java add --path D:\tools\java
 ```
 
 ## 設定
@@ -95,6 +104,7 @@ lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 | `maven` | Maven リポジトリのミラー |
 | `isolate` | デフォルトでインスタンス分離を有効にするかどうか |
 | `language` | インターフェース言語（`zh-CN` / `en-US` / `ja-JP`） |
+| `user_java` | 手動で追加した Java 検索パス（実行ファイル、Java ホーム、複数の JDK を含む親フォルダ） |
 
 基準ディレクトリの決定ルール：実行ファイルがあるディレクトリから親ディレクトリへ辿り、`Cargo.toml` を含むディレクトリを探します。開発環境ではプロジェクトルートがそれに該当し、見つからない場合は現在の作業ディレクトリを使用します。
 

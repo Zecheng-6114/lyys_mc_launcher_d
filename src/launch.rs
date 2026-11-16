@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -547,9 +546,14 @@ fn tokenize(input: &str) -> Vec<String> {
     out
 }
 
-pub fn resolve_java(explicit: Option<&str>) -> String {
+pub fn resolve_java(explicit: Option<&str>, required: u32) -> String {
     if let Some(java) = explicit.map(str::trim).filter(|java| !java.is_empty()) {
         return java_executable(Path::new(java));
+    }
+
+    let detected = crate::java::detect(false);
+    if let Some(runtime) = crate::java::select(&detected, required) {
+        return runtime.path.clone();
     }
 
     if let Some(home) = std::env::var_os("JAVA_HOME") {
@@ -580,8 +584,10 @@ fn java_executable(path: &Path) -> String {
 }
 
 pub fn check_java(java: &str, version: &Value) -> Result<(), String> {
-    let required = version["javaVersion"]["majorVersion"].as_u64().unwrap_or(8) as u32;
-    let actual = java_major(java)?;
+    let required = version["javaVersion"]["majorVersion"]
+        .as_u64()
+        .unwrap_or(8) as u32;
+    let actual = crate::java::major_of(java)?;
 
     if actual < required {
         return Err(format!(
@@ -591,37 +597,6 @@ pub fn check_java(java: &str, version: &Value) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn java_major(java: &str) -> Result<u32, String> {
-    let output = Command::new(java)
-        .arg("-version")
-        .output()
-        .map_err(|e| format!("failed to run {java}: {e}"))?;
-
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    let start = text
-        .find("version \"")
-        .map(|index| index + "version \"".len())
-        .ok_or_else(|| format!("failed to detect Java version from {java}"))?;
-    let rest = &text[start..];
-    let version = rest.split('"').next().unwrap_or("");
-
-    if let Some(rest) = version.strip_prefix("1.") {
-        return rest
-            .split(['.', '_'])
-            .next()
-            .and_then(|value| value.parse().ok())
-            .ok_or_else(|| format!("failed to parse Java version: {version}"));
-    }
-
-    version
-        .split('.')
-        .next()
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| format!("failed to parse Java version: {version}"))
 }
 
 #[cfg(test)]

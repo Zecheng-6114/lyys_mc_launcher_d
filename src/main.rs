@@ -6,6 +6,7 @@ mod gui;
 mod i18n;
 mod installer;
 mod instance;
+mod java;
 mod launch;
 mod loader;
 mod metadata;
@@ -37,6 +38,7 @@ fn main() {
             cli::Command::Logout => run_logout(),
             cli::Command::Account(c) => run_account(&c),
             cli::Command::Mods(c) => run_mods(&c),
+            cli::Command::Java(c) => run_java(&c),
         }
         return;
     }
@@ -96,6 +98,46 @@ fn run_account(c: &cli::AccountCli) {
     if let Err(e) = result {
         eprintln!("account failed: {e}");
         std::process::exit(1);
+    }
+}
+
+fn run_java(c: &cli::JavaCli) {
+    match &c.action {
+        cli::JavaAction::List { refresh } => {
+            let runtimes = java::detect(*refresh);
+            if runtimes.is_empty() {
+                println!("no Java runtime found");
+                return;
+            }
+            for runtime in runtimes {
+                println!("{}\t{}\t{}", runtime.major, runtime.arch, runtime.path);
+            }
+        }
+        cli::JavaAction::Path { version } => {
+            let required = java::required_major(version);
+            let runtimes = java::detect(false);
+            let Some(runtime) = java::select(&runtimes, required) else {
+                eprintln!(
+                    "no Java {required}+ found; run `lyys_mc_launcher java list --refresh` to detect installed runtimes"
+                );
+                std::process::exit(1);
+            };
+            println!("{}", runtime.path);
+        }
+        cli::JavaAction::Add { path } => match java::add_user_path(path) {
+            Ok(()) => println!("added {path}"),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        },
+        cli::JavaAction::Remove { path } => match java::remove_user_path(path) {
+            Ok(()) => println!("removed {path}"),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        },
     }
 }
 
@@ -211,7 +253,7 @@ fn run_download(c: &DownloadCli) {
     };
 
     let loader_name = c.loader.as_deref().map(str::to_ascii_lowercase);
-    let java = launch::resolve_java(c.java.as_deref());
+    let required = java::required_major(&c.version);
 
     let result = match loader_name.as_deref() {
         Some("fabric") => loader::install_fabric(
@@ -221,22 +263,28 @@ fn run_download(c: &DownloadCli) {
             c.name.as_deref(),
             &origins,
         ),
-        Some("forge") => loader::install_forge(
-            &mc_dir,
-            &c.version,
-            c.loader_version.as_deref(),
-            c.name.as_deref(),
-            &java,
-            &origins,
-        ),
-        Some("neoforge") => loader::install_neoforge(
-            &mc_dir,
-            &c.version,
-            c.loader_version.as_deref(),
-            c.name.as_deref(),
-            &java,
-            &origins,
-        ),
+        Some("forge") => {
+            let java = launch::resolve_java(c.java.as_deref(), required);
+            loader::install_forge(
+                &mc_dir,
+                &c.version,
+                c.loader_version.as_deref(),
+                c.name.as_deref(),
+                &java,
+                &origins,
+            )
+        }
+        Some("neoforge") => {
+            let java = launch::resolve_java(c.java.as_deref(), required);
+            loader::install_neoforge(
+                &mc_dir,
+                &c.version,
+                c.loader_version.as_deref(),
+                c.name.as_deref(),
+                &java,
+                &origins,
+            )
+        }
         Some(other) => Err(format!(
             "unsupported loader: {other} (supported: fabric, forge, neoforge)"
         )),
@@ -407,7 +455,7 @@ fn run_launch(c: &LaunchCli) {
         maven: c.maven.as_deref(),
     };
 
-    let java = launch::resolve_java(c.java.as_deref());
+    let java = launch::resolve_java(c.java.as_deref(), java::required_major_for_version(version));
     if let Err(e) = launch::check_java(&java, version) {
         eprintln!("{}", e);
         return;

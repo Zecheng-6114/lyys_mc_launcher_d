@@ -137,7 +137,10 @@ pub fn import_file(path: &Path, options: &ImportOptions<'_>) -> Result<ImportRep
         &format!("{}_{}", manifest.name, manifest.version),
     )?;
     let game_dir = Path::new(options.mc_dir).join("versions").join(&id);
-    let java = crate::launch::resolve_java(options.java);
+    let java = crate::launch::resolve_java(
+        options.java,
+        crate::java::required_major(&manifest.game_version),
+    );
 
     let mut report = ImportReport {
         id: id.clone(),

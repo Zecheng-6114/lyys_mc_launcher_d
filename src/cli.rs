@@ -10,6 +10,18 @@ pub enum Command {
     Logout,
     Account(AccountCli),
     Mods(ModCli),
+    Java(JavaCli),
+}
+
+pub enum JavaAction {
+    List { refresh: bool },
+    Path { version: String },
+    Add { path: String },
+    Remove { path: String },
+}
+
+pub struct JavaCli {
+    pub action: JavaAction,
 }
 
 pub enum AccountAction {
@@ -99,6 +111,7 @@ const USAGE: &str = concat!(
     "  add:    lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--version <id|number>] [--with-optional]\n",
     "  import: lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]\n",
     "  mods:   lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]\n",
+    "  java:   lyys_mc_launcher java list [--refresh] | java path --version <mc_version> | java add|remove --path <path>\n",
     "  login:  lyys_mc_launcher login (Microsoft device code flow)\n",
     "  logout: lyys_mc_launcher logout\n",
     "  account: lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>",
@@ -136,6 +149,7 @@ pub fn parse() -> Command {
         Some("logout") => Command::Logout,
         Some("account") => Command::Account(parse_account(rest)),
         Some("mods") => Command::Mods(parse_mods(rest)),
+        Some("java") => Command::Java(parse_java(rest)),
         _ => {
             println!("{USAGE}");
             std::process::exit(0);
@@ -468,6 +482,77 @@ fn parse_import(rest: &[String]) -> ImportCli {
         dry_run,
         loader,
         loader_version,
+    }
+}
+
+fn parse_java(rest: &[String]) -> JavaCli {
+    fn usage() -> ! {
+        eprintln!("error: java requires list [--refresh], path --version <mc_version> or add|remove --path <path>");
+        eprintln!("{USAGE}");
+        std::process::exit(1);
+    }
+
+    let Some(action) = rest.first().map(String::as_str) else {
+        usage();
+    };
+
+    match action {
+        "list" => {
+            let flags = rest.get(1..).unwrap_or(&[]);
+            reject_unknown_flags(flags, &[("--refresh", false)]);
+            JavaCli {
+                action: JavaAction::List {
+                    refresh: flags.iter().any(|flag| flag == "--refresh"),
+                },
+            }
+        }
+        "path" => {
+            let flags = rest.get(1..).unwrap_or(&[]);
+            reject_unknown_flags(flags, &[("--version", true)]);
+
+            let mut version: Option<String> = None;
+            for pair in flags.windows(2) {
+                if pair[0] == "--version" {
+                    version = Some(pair[1].clone());
+                }
+            }
+
+            let Some(version) = version else {
+                eprintln!("error: java path requires --version");
+                eprintln!("{USAGE}");
+                std::process::exit(1);
+            };
+
+            JavaCli {
+                action: JavaAction::Path { version },
+            }
+        }
+        "add" | "remove" => {
+            let flags = rest.get(1..).unwrap_or(&[]);
+            reject_unknown_flags(flags, &[("--path", true)]);
+
+            let mut path: Option<String> = None;
+            for pair in flags.windows(2) {
+                if pair[0] == "--path" {
+                    path = Some(pair[1].clone());
+                }
+            }
+
+            let Some(path) = path else {
+                eprintln!("error: java {action} requires --path");
+                eprintln!("{USAGE}");
+                std::process::exit(1);
+            };
+
+            JavaCli {
+                action: if action == "add" {
+                    JavaAction::Add { path }
+                } else {
+                    JavaAction::Remove { path }
+                },
+            }
+        }
+        _ => usage(),
     }
 }
 
