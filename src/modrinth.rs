@@ -7,6 +7,7 @@ use crate::download::{self, Origins};
 
 const API: &str = "https://api.modrinth.com/v2";
 
+#[derive(Clone)]
 pub struct Hit {
     pub slug: String,
     pub title: String,
@@ -62,6 +63,52 @@ pub struct OptionalDep {
     pub installed: bool,
 }
 
+#[derive(Clone)]
+pub struct ProjectVersion {
+    pub id: String,
+    pub number: String,
+    pub name: String,
+    pub date: String,
+    pub loaders: Vec<String>,
+    pub game_versions: Vec<String>,
+}
+
+pub fn project_versions(slug: &str) -> Result<Vec<ProjectVersion>, String> {
+    let body = download::get_json(&format!("{API}/project/{slug}/version"))?;
+    let list = body
+        .as_array()
+        .ok_or_else(|| String::from("modrinth: malformed version list"))?;
+
+    Ok(list
+        .iter()
+        .map(|version| ProjectVersion {
+            id: version["id"].as_str().unwrap_or_default().to_string(),
+            number: version["version_number"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            name: version["name"].as_str().unwrap_or_default().to_string(),
+            date: version["date_published"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            loaders: strings(&version["loaders"]),
+            game_versions: strings(&version["game_versions"]),
+        })
+        .collect())
+}
+
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub struct InstallReport {
     pub files: Vec<String>,
     pub optional: Vec<OptionalDep>,
@@ -74,6 +121,7 @@ pub fn install(
     project_type: &str,
     loaders: &[String],
     versions: &[String],
+    pin: Option<&str>,
     with_optional: bool,
 ) -> Result<InstallReport, String> {
     let target = match project_type {
@@ -98,7 +146,10 @@ pub fn install(
     std::fs::create_dir_all(&target_dir)
         .map_err(|e| format!("failed to create dir {}: {e}", target_dir.display()))?;
 
-    let mut queue: Vec<Value> = vec![latest_version(slug, loaders, versions)?];
+    let mut queue: Vec<Value> = vec![match pin {
+        Some(pin) => pinned_version(slug, pin)?,
+        None => latest_version(slug, loaders, versions)?,
+    }];
     let mut visited: Vec<String> = Vec::new();
     let mut files: Vec<String> = Vec::new();
     let mut optional: Vec<OptionalDep> = Vec::new();
@@ -290,6 +341,20 @@ fn latest_version(slug: &str, loaders: &[String], versions: &[String]) -> Result
 
 fn version_by_id(id: &str) -> Result<Value, String> {
     download::get_json(&format!("{API}/version/{id}"))
+}
+
+fn pinned_version(slug: &str, pin: &str) -> Result<Value, String> {
+    let body = download::get_json(&format!("{API}/project/{slug}/version"))?;
+    let list = body
+        .as_array()
+        .ok_or_else(|| String::from("modrinth: malformed version list"))?;
+
+    list.iter()
+        .find(|version| {
+            version["id"].as_str() == Some(pin) || version["version_number"].as_str() == Some(pin)
+        })
+        .cloned()
+        .ok_or_else(|| format!("version {pin} not found for {slug}"))
 }
 
 fn download_version(version: &Value, target_dir: &Path) -> Result<String, String> {

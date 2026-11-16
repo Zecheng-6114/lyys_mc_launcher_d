@@ -155,6 +155,7 @@ fn run_add(c: &AddCli) {
         &c.project_type,
         &loaders,
         &versions,
+        c.version.as_deref(),
         c.with_optional,
     ) {
         Ok(report) => {

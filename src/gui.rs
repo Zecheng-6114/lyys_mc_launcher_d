@@ -250,6 +250,11 @@ pub struct LauncherUi {
     search_results_state: LoadState,
     search_results_key: Option<String>,
     search_icons: HashMap<String, Arc<Image>>,
+    mod_detail: Option<modrinth::Hit>,
+    mod_versions: Vec<modrinth::ProjectVersion>,
+    mod_versions_state: LoadState,
+    mod_versions_key: Option<String>,
+    mod_version_selected: Option<String>,
     download_instance_picker: bool,
 }
 
@@ -356,6 +361,11 @@ impl LauncherUi {
             search_results_state: LoadState::Idle,
             search_results_key: None,
             search_icons: HashMap::new(),
+            mod_detail: None,
+            mod_versions: Vec::new(),
+            mod_versions_state: LoadState::Idle,
+            mod_versions_key: None,
+            mod_version_selected: None,
             download_instance_picker: false,
         };
         for watched in [
@@ -383,10 +393,8 @@ impl LauncherUi {
             }
         })
         .detach();
-        cx.observe(&this.mod_instance_input, |this, _, cx| {
-            if this.download_instance_picker {
-                cx.notify();
-            }
+        cx.observe(&this.mod_instance_input, |_, _, cx| {
+            cx.notify();
         })
         .detach();
         this.reload(cx);
@@ -1091,7 +1099,11 @@ impl LauncherUi {
         if dir.is_empty() {
             return;
         }
-        let slug = Self::value(&self.mod_slug_input, cx);
+        let slug = self
+            .mod_detail
+            .as_ref()
+            .map(|detail| detail.slug.clone())
+            .unwrap_or_else(|| Self::value(&self.mod_slug_input, cx));
         if slug.is_empty() {
             return;
         }
@@ -1111,6 +1123,10 @@ impl LauncherUi {
         push_option(&mut args, "--java", &java);
         push_option(&mut args, "--mirror", &mirror);
         push_option(&mut args, "--maven", &maven);
+        if let Some(version) = self.effective_mod_version(cx) {
+            args.push(String::from("--pack-version"));
+            args.push(version);
+        }
         if self.import_optional {
             args.push(String::from("--with-optional"));
         }
@@ -1152,7 +1168,16 @@ impl LauncherUi {
         } else {
             Vec::new()
         };
-        let versions = split_values(&Self::value(&self.mod_version_input, cx));
+        let versions = if project_type == "modpack" {
+            split_values(&Self::value(&self.mod_version_input, cx))
+        } else {
+            let instance = Self::value(&self.mod_instance_input, cx);
+            self.instances
+                .iter()
+                .find(|row| row.name.as_ref() == instance.as_str())
+                .map(|row| vec![row.version.to_string()])
+                .unwrap_or_default()
+        };
         let limit: u32 = Self::value(&self.mod_limit_input, cx).parse().unwrap_or(10);
 
         self.search_results.clear();
@@ -1270,6 +1295,7 @@ impl LauncherUi {
                     );
                     let active = !slug.is_empty() && slug == selected;
                     let icon = search_icon_element(self, hit, &title);
+                    let hit_open = hit.clone();
                     list = list.child(
                         h_flex()
                             .id(SharedString::from(format!("search-result-{id_slug}")))
@@ -1285,7 +1311,8 @@ impl LauncherUi {
                             .hover(|style| style.bg(skin::c(skin::HOVER)))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 Self::set_input(&this.mod_slug_input, &slug, window, cx);
-                                cx.notify();
+                                this.download_instance_picker = false;
+                                this.open_mod_detail(&hit_open, cx);
                             }))
                             .child(icon)
                             .child(
@@ -1406,11 +1433,15 @@ impl LauncherUi {
     fn add_mod(&mut self, cx: &mut Context<Self>) {
         let dir = Self::value(&self.dir_input, cx);
         let name = Self::value(&self.mod_instance_input, cx);
-        let slug = Self::value(&self.mod_slug_input, cx);
+        let Some(detail) = self.mod_detail.clone() else {
+            return;
+        };
+        let slug = detail.slug.clone();
         if dir.is_empty() || name.is_empty() || slug.is_empty() {
             return;
         }
-        let args = vec![
+
+        let mut args = vec![
             String::from("add"),
             String::from("--dir"),
             dir,
@@ -1421,6 +1452,11 @@ impl LauncherUi {
             String::from("--type"),
             String::from(self.search_type()),
         ];
+        if let Some(version) = self.effective_mod_version(cx) {
+            args.push(String::from("--version"));
+            args.push(version);
+        }
+
         let title = self.t_args("task.title.add", &[("slug", &slug)]);
         self.start_task(
             title,
@@ -1430,6 +1466,375 @@ impl LauncherUi {
             None,
             cx,
         );
+    }
+
+    fn open_mod_detail(&mut self, hit: &modrinth::Hit, cx: &mut Context<Self>) {
+        self.mod_detail = Some(hit.clone());
+        self.load_mod_versions(&hit.slug, cx);
+    }
+
+    fn close_mod_detail(&mut self, cx: &mut Context<Self>) {
+        self.mod_detail = None;
+        cx.notify();
+    }
+
+    fn load_mod_versions(&mut self, slug: &str, cx: &mut Context<Self>) {
+        if self.mod_versions_key.as_deref() == Some(slug)
+            && matches!(
+                self.mod_versions_state,
+                LoadState::Loading | LoadState::Ready
+            )
+        {
+            return;
+        }
+        self.mod_versions.clear();
+        self.mod_version_selected = None;
+        self.mod_versions_key = Some(slug.to_string());
+        self.mod_versions_state = LoadState::Loading;
+        cx.notify();
+
+        let key = slug.to_string();
+        let fetch = key.clone();
+        let task = cx.background_spawn(async move { modrinth::project_versions(&fetch) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.mod_versions_key.as_deref() != Some(key.as_str()) {
+                    return;
+                }
+
+                match result {
+                    Ok(list) => {
+                        this.mod_versions = list;
+                        this.mod_versions_state = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        this.mod_versions_state = LoadState::Failed(SharedString::from(error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn filtered_mod_versions(&self, cx: &Context<Self>) -> Vec<modrinth::ProjectVersion> {
+        if self.download_tab == 1 {
+            return self.mod_versions.clone();
+        }
+        let mut loaders = if matches!(self.download_tab, 2 | 4) {
+            split_values(&Self::value(&self.mod_loader_input, cx))
+        } else {
+            Vec::new()
+        };
+        let instance = Self::value(&self.mod_instance_input, cx);
+        let row = self
+            .instances
+            .iter()
+            .find(|row| row.name.as_ref() == instance.as_str());
+        let mc_version = row.map(|row| row.version.to_string());
+        if loaders.is_empty() && self.download_tab == 2 {
+            if let Some(row) = row {
+                if row.loader.as_ref() != "vanilla" {
+                    loaders = vec![row.loader.to_string()];
+                }
+            }
+        }
+
+        self.mod_versions
+            .iter()
+            .filter(|version| {
+                mc_version
+                    .as_ref()
+                    .map_or(true, |mc| {
+                        version.game_versions.iter().any(|item| item == mc)
+                    })
+                    && (loaders.is_empty()
+                        || version.loaders.iter().any(|item| loaders.contains(item)))
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn effective_mod_version(&self, cx: &Context<Self>) -> Option<String> {
+        if self.mod_detail.is_none() {
+            return None;
+        }
+        let filtered = self.filtered_mod_versions(cx);
+        if let Some(selected) = &self.mod_version_selected {
+            if filtered.iter().any(|version| &version.id == selected) {
+                return Some(selected.clone());
+            }
+        }
+        if let Some(first) = filtered.first() {
+            return Some(first.id.clone());
+        }
+        self.mod_versions.first().map(|version| version.id.clone())
+    }
+
+    fn render_project_detail(
+        &self,
+        hit: &modrinth::Hit,
+        pack: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let icon = search_icon_element(self, hit, &hit.title);
+        let downloads = self.t_args(
+            "download.results.downloads",
+            &[("count", &hit.downloads.to_string())],
+        );
+        let description = clip_text(&hit.description, 160);
+        let selected = self.effective_mod_version(cx);
+        let filtered = self.filtered_mod_versions(cx);
+        let prefix = if pack { "pack" } else { "mod" };
+        let versions_title = if pack {
+            self.t("download.pack.versions.title")
+        } else {
+            self.t("download.mod.versions.title")
+        };
+
+        let versions_body: AnyElement = match &self.mod_versions_state {
+            LoadState::Idle | LoadState::Loading => div()
+                .px(px(20.))
+                .py(px(14.))
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("download.mod.versions.loading"))
+                .into_any_element(),
+            LoadState::Failed(error) => v_flex()
+                .px(px(20.))
+                .py(px(14.))
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .text_color(skin::c(skin::DANGER_FG))
+                        .child(self.t_args(
+                            "download.mod.versions.error",
+                            &[("error", error.as_ref())],
+                        )),
+                )
+                .child(
+                    text_button(
+                        SharedString::from(format!("{prefix}-versions-retry")),
+                        self.t("common.retry"),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let slug = this
+                            .mod_detail
+                            .as_ref()
+                            .map(|detail| detail.slug.clone())
+                            .unwrap_or_default();
+                        this.load_mod_versions(&slug, cx);
+                    })),
+                )
+                .into_any_element(),
+            LoadState::Ready if filtered.is_empty() => div()
+                .px(px(20.))
+                .py(px(14.))
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("download.mod.versions.empty"))
+                .into_any_element(),
+            LoadState::Ready => {
+                let mut list = v_flex()
+                    .id(SharedString::from(format!("{prefix}-version-list")))
+                    .max_h(px(260.))
+                    .overflow_y_scroll()
+                    .gap(px(1.))
+                    .px(px(10.))
+                    .py(px(10.));
+                for version in &filtered {
+                    let id = version.id.clone();
+                    let number = version.number.clone();
+                    let name = if version.name.is_empty() || version.name == version.number {
+                        String::new()
+                    } else {
+                        version.name.clone()
+                    };
+                    let loaders = version.loaders.join(", ");
+                    let date = version.date.get(..10).unwrap_or_default().to_string();
+                    let active = selected.as_deref() == Some(version.id.as_str());
+                    list = list.child(
+                        h_flex()
+                            .id(SharedString::from(format!(
+                                "{prefix}-version-{}",
+                                version.id
+                            )))
+                            .w_full()
+                            .px(px(10.))
+                            .py(px(7.))
+                            .rounded(px(6.))
+                            .gap(px(12.))
+                            .items_center()
+                            .cursor(CursorStyle::PointingHand)
+                            .when(active, |style| style.bg(skin::c(skin::ACTIVE)))
+                            .hover(|style| style.bg(skin::c(skin::HOVER)))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.mod_version_selected = Some(id.clone());
+                                cx.notify();
+                            }))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .text_size(px(12.5))
+                                            .font_medium()
+                                            .text_color(skin::c(skin::TEXT))
+                                            .child(number),
+                                    )
+                                    .when(!name.is_empty(), |column| {
+                                        column.child(
+                                            div()
+                                                .min_w_0()
+                                                .text_size(px(11.))
+                                                .text_color(skin::c(skin::FAINT))
+                                                .child(name),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(11.))
+                                    .text_color(skin::c(skin::FAINT))
+                                    .child(SharedString::from(if loaders.is_empty() {
+                                        date
+                                    } else {
+                                        format!("{loaders} · {date}")
+                                    })),
+                            ),
+                    );
+                }
+                list.into_any_element()
+            }
+        };
+
+        let target: AnyElement = if pack {
+            panel()
+                .child(
+                    row()
+                        .child(row_title(self.t("download.import.name.title")))
+                        .child(self.input_control(&self.import_name_input)),
+                )
+                .child(sep())
+                .child(
+                    row()
+                        .child(row_title(self.t("download.import.optional.title")))
+                        .child(
+                            Switch::new("pack-detail-optional")
+                                .checked(self.import_optional)
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.import_optional = *checked;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .into_any_element()
+        } else {
+            panel()
+                .child(
+                    row()
+                        .child(row_title(self.t("download.content.instance.title")))
+                        .child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .items_center()
+                                .gap(px(6.))
+                                .child(self.input_control(&self.mod_instance_input))
+                                .child(
+                                    text_button(
+                                        "pick-download-instance",
+                                        self.t("download.instance.pick"),
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_download_instance_picker(cx)
+                                    })),
+                                ),
+                        ),
+                )
+                .when(self.download_instance_picker, |target| {
+                    target.child(sep()).child(self.render_instance_options(cx))
+                })
+                .into_any_element()
+        };
+
+        let action = if pack {
+            primary_button("pack-detail-import", self.t("download.import.run"))
+                .on_click(cx.listener(|this, _, _, cx| this.import_modrinth(cx)))
+        } else {
+            primary_button("detail-install", self.t("download.content.add")).on_click(
+                cx.listener(|this, _, _, cx| this.add_mod(cx)),
+            )
+        };
+
+        v_flex()
+            .gap(px(20.))
+            .child(
+                panel()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(12.))
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(px(12.))
+                                    .child(icon)
+                                    .child(
+                                        v_flex()
+                                            .min_w_0()
+                                            .gap(px(2.))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .text_size(px(14.))
+                                                    .font_medium()
+                                                    .text_color(skin::c(skin::TEXT))
+                                                    .child(hit.title.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .text_size(px(11.))
+                                                    .text_color(skin::c(skin::FAINT))
+                                                    .child(downloads),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                text_button("project-detail-back", self.t("download.mod.back"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_mod_detail(cx)
+                                    })),
+                            ),
+                    )
+                    .child(sep())
+                    .child(
+                        div()
+                            .px(px(20.))
+                            .py(px(10.))
+                            .text_size(px(12.))
+                            .text_color(skin::c(skin::MUTED))
+                            .child(description),
+                    ),
+            )
+            .child(
+                panel()
+                    .child(row().child(row_title(versions_title)))
+                    .child(sep())
+                    .child(versions_body),
+            )
+            .child(target)
+            .child(h_flex().w_full().justify_end().child(action))
+            .into_any_element()
     }
 
     fn open_instance_settings(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2289,6 +2694,9 @@ impl LauncherUi {
         if self.download_tab == 0 {
             body = body.child(self.render_install_form(cx));
         } else if self.download_tab == 1 {
+            if let Some(detail) = self.mod_detail.clone() {
+                body = body.child(self.render_project_detail(&detail, true, cx));
+            } else {
             let mut pack_search = panel()
                 .child(
                     row()
@@ -2381,19 +2789,10 @@ impl LauncherUi {
                         cx.listener(|this, _, _, cx| this.search_mods(cx)),
                     ),
                 ))
-                .child(self.render_search_results(cx))
-                .child(
-                    panel().child(
-                        row()
-                            .child(row_title(self.t("download.pack.slug.title")))
-                            .child(self.input_control(&self.mod_slug_input)),
-                    ),
-                )
-                .child(h_flex().w_full().justify_end().child(
-                    primary_button("pack-import-run", self.t("download.pack.import")).on_click(
-                        cx.listener(|this, _, _, cx| this.import_modrinth(cx)),
-                    ),
-                ));
+                .child(self.render_search_results(cx));
+            }
+        } else if let Some(detail) = self.mod_detail.clone() {
+            body = body.child(self.render_project_detail(&detail, false, cx));
         } else {
             let mut search = panel().child(
                 row()
@@ -2467,44 +2866,54 @@ impl LauncherUi {
                 };
                 search = search.child(sep()).child(row().child(label).child(control));
             }
+            let instance_name = Self::value(&self.mod_instance_input, cx);
+            let detected_version = self
+                .instances
+                .iter()
+                .find(|row| row.name.as_ref() == instance_name.as_str())
+                .map(|row| row.version.to_string());
+            let version_text: SharedString = match detected_version {
+                Some(version) => SharedString::from(version),
+                None => self.t("download.version.none"),
+            };
+            let mut search = search
+                .child(sep())
+                .child(
+                    row()
+                        .child(row_title(self.t("download.content.instance.title")))
+                        .child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .items_center()
+                                .gap(px(6.))
+                                .child(self.input_control(&self.mod_instance_input))
+                                .child(
+                                    text_button(
+                                        "pick-download-instance",
+                                        self.t("download.instance.pick"),
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_download_instance_picker(cx)
+                                    })),
+                                ),
+                        ),
+                );
+            if self.download_instance_picker {
+                search = search.child(sep()).child(self.render_instance_options(cx));
+            }
             let search = search
                 .child(sep())
                 .child(
                     row()
                         .child(row_title(self.t("download.version.title")))
                         .child(
-                            h_flex()
-                                .flex_shrink_0()
-                                .gap(px(8.))
-                                .child(self.input_control(&self.mod_version_input))
-                                .child(
-                                    text_button(
-                                        "download-version-list",
-                                        if self.download_version_picker {
-                                            self.t("common.close")
-                                        } else {
-                                            self.t("common.list")
-                                        },
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.toggle_download_version_picker(window, cx)
-                                    })),
-                                ),
+                            div()
+                                .min_w_0()
+                                .text_size(px(12.5))
+                                .text_color(skin::c(skin::MUTED))
+                                .child(version_text),
                         ),
                 );
-            let search = if self.download_version_picker {
-                search
-                    .child(sep())
-                    .child(self.render_version_picker_for(
-                        &self.mod_version_input,
-                        &self.download_version_query,
-                        "download-version-list",
-                        false,
-                        cx,
-                    ))
-            } else {
-                search
-            };
             let search = search
                 .child(sep())
                 .child(
@@ -2517,44 +2926,7 @@ impl LauncherUi {
                     cx.listener(|this, _, _, cx| this.search_mods(cx)),
                 ),
             ))
-                .child(self.render_search_results(cx))
-                .child(
-                    panel()
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.pack.slug.title")))
-                                .child(self.input_control(&self.mod_slug_input)),
-                        )
-                        .child(sep())
-                        .child(
-                            row()
-                                .child(row_title(self.t("download.content.instance.title")))
-                                .child(
-                                    h_flex()
-                                        .flex_shrink_0()
-                                        .items_center()
-                                        .gap(px(6.))
-                                        .child(self.input_control(&self.mod_instance_input))
-                                        .child(
-                                            text_button(
-                                                "pick-download-instance",
-                                                self.t("download.instance.pick"),
-                                            )
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.toggle_download_instance_picker(cx)
-                                            })),
-                                        ),
-                                ),
-                        )
-                        .when(self.download_instance_picker, |panel| {
-                            panel.child(sep()).child(self.render_instance_options(cx))
-                        }),
-                )
-                .child(h_flex().w_full().justify_end().child(
-                    primary_button("add-run", self.t("download.content.add")).on_click(
-                        cx.listener(|this, _, _, cx| this.add_mod(cx)),
-                    ),
-                ));
+                .child(self.render_search_results(cx));
         }
 
         v_flex()
@@ -2657,6 +3029,7 @@ impl LauncherUi {
                     this.search_results.clear();
                     this.search_results_state = LoadState::Idle;
                     this.search_results_key = None;
+                    this.mod_detail = None;
                     this.download_version_picker = false;
                     this.download_instance_picker = false;
                 }

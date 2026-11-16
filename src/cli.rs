@@ -49,6 +49,7 @@ pub struct AddCli {
     pub instance: String,
     pub slug: String,
     pub project_type: String,
+    pub version: Option<String>,
     pub with_optional: bool,
 }
 
@@ -84,7 +85,7 @@ const USAGE: &str = concat!(
     "  launch: lyys_mc_launcher launch --dir <game_dir> --name <instance> [--username <name>] [--memory <MB>] [--isolate] [--offline] [--mirror <url>] [--maven <url>] [--java <path>]\n",
     "  download: lyys_mc_launcher download --dir <game_dir> --version <version> [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--name <instance>] [--java <path>] [--mirror <url>] [--maven <url>]\n",
     "  search: lyys_mc_launcher search --query <text> --type <mod|modpack|resourcepack|shader|datapack> [--loader <a,b>] [--version <x,y>] [--limit <n>]\n",
-    "  add:    lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--with-optional]\n",
+    "  add:    lyys_mc_launcher add --dir <game_dir> --name <instance> --slug <slug> --type <kind> [--version <id|number>] [--with-optional]\n",
     "  import: lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]\n",
     "  mods:   lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]\n",
     "  login:  lyys_mc_launcher login (Microsoft device code flow)\n",
@@ -309,6 +310,7 @@ fn parse_add(rest: &[String]) -> AddCli {
             ("--name", true),
             ("--slug", true),
             ("--type", true),
+            ("--version", true),
             ("--with-optional", false),
         ],
     );
@@ -317,6 +319,7 @@ fn parse_add(rest: &[String]) -> AddCli {
     let mut instance: Option<String> = None;
     let mut slug: Option<String> = None;
     let mut project_type: Option<String> = None;
+    let mut version: Option<String> = None;
 
     for w in rest.windows(2) {
         match w[0].as_str() {
@@ -324,6 +327,7 @@ fn parse_add(rest: &[String]) -> AddCli {
             "--name" => instance = Some(w[1].clone()),
             "--slug" => slug = Some(w[1].clone()),
             "--type" => project_type = Some(w[1].clone()),
+            "--version" => version = Some(w[1].clone()),
             _ => {}
         }
     }
@@ -359,6 +363,7 @@ fn parse_add(rest: &[String]) -> AddCli {
         instance: instance.unwrap(),
         slug: slug.unwrap(),
         project_type: project_type.unwrap(),
+        version,
         with_optional,
     }
 }
