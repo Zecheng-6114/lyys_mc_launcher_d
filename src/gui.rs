@@ -190,6 +190,7 @@ pub struct LauncherUi {
     download_tab: usize,
     lang: Lang,
     language: Option<SharedString>,
+    saved_settings: Value,
     instances: Vec<InstanceRow>,
     account: Option<SharedString>,
     tasks: Vec<TaskEntry>,
@@ -302,6 +303,7 @@ impl LauncherUi {
             download_tab: 0,
             lang,
             language: settings.language.clone().map(SharedString::from),
+            saved_settings: Value::Null,
             instances: Vec::new(),
             account: None,
             tasks: Vec::new(),
@@ -399,6 +401,17 @@ impl LauncherUi {
             cx.notify();
         })
         .detach();
+        for watched in [
+            &this.dir_input,
+            &this.username_input,
+            &this.memory_input,
+            &this.java_input,
+            &this.mirror_input,
+            &this.maven_input,
+        ] {
+            cx.observe(watched, |_, _, cx| cx.notify()).detach();
+        }
+        this.saved_settings = this.settings_value(cx);
         this.reload(cx);
         this
     }
@@ -440,7 +453,9 @@ impl LauncherUi {
         self.lang = lang;
         self.language = Some(SharedString::from(lang.tag()));
         let value = self.settings_value(cx);
-        let _ = write_json(&config_path(), &value, lang);
+        if write_json(&config_path(), &value, lang).is_ok() {
+            self.saved_settings = value;
+        }
         cx.notify();
     }
 
@@ -1903,8 +1918,13 @@ impl LauncherUi {
             return;
         }
         let value = self.settings_value(cx);
+        if value == self.saved_settings {
+            return;
+        }
         let path = config_path();
-        let _ = write_json(&path, &value, self.lang);
+        if write_json(&path, &value, self.lang).is_ok() {
+            self.saved_settings = value;
+        }
         self.reload(cx);
     }
 }
@@ -2370,6 +2390,23 @@ fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> S
         .font_medium()
         .cursor(CursorStyle::PointingHand)
         .hover(|style| style.bg(skin::c(skin::ACCENT_HOVER)))
+        .child(label)
+}
+
+fn disabled_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .h(px(30.))
+        .px(px(12.))
+        .rounded(px(7.))
+        .flex()
+        .items_center()
+        .bg(skin::c(skin::FIELD))
+        .text_color(skin::c(skin::FAINT))
+        .text_size(px(12.5))
+        .font_medium()
+        .cursor(CursorStyle::Arrow)
         .child(label)
 }
 
@@ -3242,14 +3279,16 @@ impl LauncherUi {
                                         ),
                                 ),
                             )
-                            .child(
-                                h_flex().w_full().justify_end().child(
+                            .child(h_flex().w_full().justify_end().child(
+                                if self.settings_value(cx) == self.saved_settings {
+                                    disabled_button("save-settings", self.t("settings.save"))
+                                } else {
                                     primary_button("save-settings", self.t("settings.save"))
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.save_settings(cx)),
-                                        ),
-                                ),
-                            ),
+                                        )
+                                },
+                            )),
                     ),
             )
     }
