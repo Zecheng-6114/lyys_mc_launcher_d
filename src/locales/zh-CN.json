@@ -40,6 +40,11 @@
   "download.content.instance.title": "实例名称",
   "download.content.search": "搜索",
   "download.content.add": "添加到实例",
+  "download.results.title": "搜索结果",
+  "download.results.loading": "正在搜索…",
+  "download.results.empty": "没有匹配的结果",
+  "download.results.error": "搜索失败：{error}",
+  "download.results.downloads": "{count} 下载",
 
   "page.settings.title": "设置",
   "settings.game_dir.title": "游戏目录",

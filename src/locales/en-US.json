@@ -40,6 +40,11 @@
   "download.content.instance.title": "Instance name",
   "download.content.search": "Search",
   "download.content.add": "Add to instance",
+  "download.results.title": "Results",
+  "download.results.loading": "Searching…",
+  "download.results.empty": "No matching results",
+  "download.results.error": "Search failed: {error}",
+  "download.results.downloads": "{count} downloads",
 
   "page.settings.title": "Settings",
   "settings.game_dir.title": "Game directory",

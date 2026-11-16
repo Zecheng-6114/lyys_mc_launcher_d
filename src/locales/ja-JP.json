@@ -40,6 +40,11 @@
   "download.content.instance.title": "インスタンス名",
   "download.content.search": "検索",
   "download.content.add": "インスタンスに追加",
+  "download.results.title": "検索結果",
+  "download.results.loading": "検索中…",
+  "download.results.empty": "一致する結果はありません",
+  "download.results.error": "検索に失敗しました：{error}",
+  "download.results.downloads": "{count} ダウンロード",
 
   "page.settings.title": "設定",
   "settings.game_dir.title": "ゲームディレクトリ",

@@ -28,6 +28,7 @@ use smol::channel;
 use crate::catalog::{self, GameVersion};
 use crate::i18n::{self, Lang};
 use crate::instance::{self, LaunchConfig};
+use crate::modrinth;
 use crate::mods;
 
 mod skin {
@@ -242,6 +243,9 @@ pub struct LauncherUi {
     mod_limit_input: Entity<input::InputState>,
     mod_slug_input: Entity<input::InputState>,
     mod_instance_input: Entity<input::InputState>,
+    search_results: Vec<modrinth::Hit>,
+    search_results_state: LoadState,
+    search_results_key: Option<String>,
 }
 
 pub fn run() -> Result<(), Box<dyn Error>> {
@@ -341,6 +345,9 @@ impl LauncherUi {
             mod_limit_input: input(window, "10", cx),
             mod_slug_input: input(window, "", cx),
             mod_instance_input: input(window, "", cx),
+            search_results: Vec::new(),
+            search_results_state: LoadState::Idle,
+            search_results_key: None,
         };
         for watched in [
             &this.install_version_query,
@@ -355,6 +362,12 @@ impl LauncherUi {
             })
             .detach();
         }
+        cx.observe(&this.mod_slug_input, |this, _, cx| {
+            if !matches!(this.search_results_state, LoadState::Idle) {
+                cx.notify();
+            }
+        })
+        .detach();
         this.reload(cx);
         this
     }
@@ -1093,35 +1106,161 @@ impl LauncherUi {
         if query.is_empty() {
             return;
         }
-        let limit = Self::value(&self.mod_limit_input, cx);
-        if limit.is_empty() {
+        if matches!(self.search_results_state, LoadState::Loading) {
             return;
         }
-        let mut args = vec![
-            String::from("search"),
-            String::from("--query"),
-            query.clone(),
-            String::from("--type"),
-            String::from(self.search_type()),
-            String::from("--limit"),
-            limit,
-        ];
-        if matches!(self.download_tab, 2 | 4) {
-            let loader = Self::value(&self.mod_loader_input, cx);
-            push_option(&mut args, "--loader", &loader);
-        }
-        let version = Self::value(&self.mod_version_input, cx);
-        push_option(&mut args, "--version", &version);
 
-        let title = self.t_args("task.title.search", &[("query", &query)]);
-        self.start_task(
-            title,
-            None,
-            args,
-            false,
-            None,
-            cx,
-        );
+        let project_type = String::from(self.search_type());
+        let key = project_type.clone();
+        let loaders: Vec<String> = if matches!(self.download_tab, 2 | 4) {
+            split_values(&Self::value(&self.mod_loader_input, cx))
+        } else {
+            Vec::new()
+        };
+        let versions = split_values(&Self::value(&self.mod_version_input, cx));
+        let limit: u32 = Self::value(&self.mod_limit_input, cx).parse().unwrap_or(10);
+
+        self.search_results.clear();
+        self.search_results_key = Some(key.clone());
+        self.search_results_state = LoadState::Loading;
+        cx.notify();
+
+        let task = cx
+            .background_spawn(async move { modrinth::search(&query, &project_type, &loaders, &versions, limit) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.search_results_key.as_ref() != Some(&key) {
+                    return;
+                }
+
+                match result {
+                    Ok(hits) => {
+                        this.search_results = hits;
+                        this.search_results_state = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        this.search_results_state = LoadState::Failed(SharedString::from(error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn render_search_results(&self, cx: &mut Context<Self>) -> AnyElement {
+        if matches!(self.search_results_state, LoadState::Idle) {
+            return div().into_any_element();
+        }
+
+        let body: AnyElement = match &self.search_results_state {
+            LoadState::Idle => div().into_any_element(),
+            LoadState::Loading => div()
+                .px(px(20.))
+                .py(px(14.))
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("download.results.loading"))
+                .into_any_element(),
+            LoadState::Failed(error) => v_flex()
+                .px(px(20.))
+                .py(px(14.))
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .text_color(skin::c(skin::DANGER_FG))
+                        .child(self.t_args("download.results.error", &[("error", error.as_ref())])),
+                )
+                .child(
+                    text_button("search-results-retry", self.t("common.retry")).on_click(
+                        cx.listener(|this, _, _, cx| this.search_mods(cx)),
+                    ),
+                )
+                .into_any_element(),
+            LoadState::Ready if self.search_results.is_empty() => div()
+                .px(px(20.))
+                .py(px(14.))
+                .text_size(px(12.5))
+                .text_color(skin::c(skin::MUTED))
+                .child(self.t("download.results.empty"))
+                .into_any_element(),
+            LoadState::Ready => {
+                let selected = Self::value(&self.mod_slug_input, cx);
+                let mut list = v_flex()
+                    .id("search-results-list")
+                    .max_h(px(300.))
+                    .overflow_y_scroll()
+                    .gap(px(1.))
+                    .px(px(10.))
+                    .py(px(10.));
+                for hit in &self.search_results {
+                    let slug = hit.slug.clone();
+                    let id_slug = slug.clone();
+                    let title = hit.title.clone();
+                    let description = clip_text(&hit.description, 96);
+                    let downloads = self.t_args(
+                        "download.results.downloads",
+                        &[("count", &hit.downloads.to_string())],
+                    );
+                    let active = !slug.is_empty() && slug == selected;
+                    list = list.child(
+                        h_flex()
+                            .id(SharedString::from(format!("search-result-{id_slug}")))
+                            .w_full()
+                            .min_w_0()
+                            .px(px(10.))
+                            .py(px(7.))
+                            .rounded(px(6.))
+                            .gap(px(12.))
+                            .items_center()
+                            .cursor(CursorStyle::PointingHand)
+                            .when(active, |style| style.bg(skin::c(skin::ACTIVE)))
+                            .hover(|style| style.bg(skin::c(skin::HOVER)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                Self::set_input(&this.mod_slug_input, &slug, window, cx);
+                                cx.notify();
+                            }))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .text_size(px(12.5))
+                                            .font_medium()
+                                            .text_color(skin::c(skin::TEXT))
+                                            .child(title),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .text_size(px(11.))
+                                            .text_color(skin::c(skin::FAINT))
+                                            .child(description),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(11.))
+                                    .text_color(skin::c(skin::FAINT))
+                                    .child(downloads),
+                            ),
+                    );
+                }
+                list.into_any_element()
+            }
+        };
+
+        panel()
+            .child(row().child(row_title(self.t("download.results.title"))))
+            .child(sep())
+            .child(body)
+            .into_any_element()
     }
 
     fn add_mod(&mut self, cx: &mut Context<Self>) {
@@ -1394,6 +1533,23 @@ fn push_option(args: &mut Vec<String>, flag: &str, value: &str) {
         args.push(flag.to_string());
         args.push(value.to_string());
     }
+}
+
+fn split_values(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn clip_text(text: &str, max: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max {
+        return trimmed.to_string();
+    }
+    let clipped: String = trimmed.chars().take(max).collect();
+    format!("{clipped}…")
 }
 
 fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
@@ -1998,6 +2154,7 @@ impl LauncherUi {
                         cx.listener(|this, _, _, cx| this.search_mods(cx)),
                     ),
                 ))
+                .child(self.render_search_results(cx))
                 .child(
                     panel().child(
                         row()
@@ -2104,6 +2261,7 @@ impl LauncherUi {
                         cx.listener(|this, _, _, cx| this.search_mods(cx)),
                     ),
                 ))
+                .child(self.render_search_results(cx))
                 .child(
                     panel()
                         .child(
@@ -2221,6 +2379,11 @@ impl LauncherUi {
             .when(!active, |this| this.text_color(skin::c(skin::MUTED)))
             .cursor(CursorStyle::PointingHand)
             .on_click(cx.listener(move |this, _event, window, cx| {
+                if this.download_tab != index {
+                    this.search_results.clear();
+                    this.search_results_state = LoadState::Idle;
+                    this.search_results_key = None;
+                }
                 this.download_tab = index;
                 if index == 2 {
                     let current = Self::value(&this.mod_loader_input, cx);
