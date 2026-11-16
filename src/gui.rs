@@ -673,7 +673,7 @@ impl LauncherUi {
             maven: config
                 .maven
                 .unwrap_or_else(|| Self::value(&self.maven_input, cx)),
-            isolate: config.isolate.unwrap_or(self.isolate),
+            isolate: instance::is_isolated(&dir, name),
         };
         (dir, params)
     }
@@ -1945,7 +1945,7 @@ impl LauncherUi {
             .maven
             .unwrap_or_else(|| Self::value(&self.maven_input, cx));
         Self::set_input(&self.cfg_maven_input, &maven, window, cx);
-        self.cfg_isolate = config.isolate.unwrap_or(self.isolate);
+        self.cfg_isolate = instance::is_isolated(&dir, name);
 
         self.mods = Vec::new();
         self.load_mods(name, cx);
@@ -1972,6 +1972,7 @@ impl LauncherUi {
             isolate: Some(self.cfg_isolate),
         };
         let _ = instance::write_launch_config(&dir, &name, &config);
+        self.load_mods(&name, cx);
         self.reload(cx);
     }
 
