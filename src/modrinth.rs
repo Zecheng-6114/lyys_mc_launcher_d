@@ -82,6 +82,8 @@ pub fn install(
         other => return Err(format!("unsupported project_type: {other}")),
     };
 
+    let loaders = loader_filter(project_type, loaders);
+
     let version_json = Path::new(mc_dir)
         .join("versions")
         .join(instance)
@@ -158,6 +160,13 @@ pub fn install(
     }
 
     Ok(InstallReport { files, optional })
+}
+
+fn loader_filter<'a>(project_type: &str, loaders: &'a [String]) -> &'a [String] {
+    match project_type {
+        "mod" => loaders,
+        _ => &[],
+    }
 }
 
 fn project_title(project_id: &str) -> Option<String> {
@@ -332,4 +341,23 @@ fn encode(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loader_filter_keeps_loaders_only_for_mods() {
+        let loaders = vec![
+            String::from("fabric"),
+            String::from("forge"),
+            String::from("neoforge"),
+        ];
+        assert_eq!(loader_filter("mod", &loaders), &loaders);
+        assert!(loader_filter("shader", &loaders).is_empty());
+        assert!(loader_filter("resourcepack", &loaders).is_empty());
+        assert!(loader_filter("datapack", &loaders).is_empty());
+        assert!(loader_filter("unknown", &loaders).is_empty());
+    }
 }

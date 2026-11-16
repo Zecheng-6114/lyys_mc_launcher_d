@@ -17,7 +17,7 @@ A Minecraft launcher built with Rust and GPUI, offering both a graphical interfa
 - **Mirror acceleration**: `--mirror` / `--maven` rewrite Mojang resource and Maven repository download sources
 - **Integrity checks**: downloads are verified with SHA1 / SHA512 and retried on failure
 - **Offline play**: derives an offline UUID from the username
-- **Microsoft sign-in**: official login via the device code flow with automatic token refresh; when signed in, launching uses the official identity automatically
+- **Microsoft sign-in**: official login via the device code flow with the verification code auto-copied and the browser opened automatically, with automatic token refresh; when signed in, launching uses the official identity automatically
 - **Multilingual**: Simplified Chinese / English / Japanese
 - **Parallel tasks**: the graphical interface supports running multiple tasks in parallel with live logs
 
