@@ -8,7 +8,18 @@ pub enum Command {
     Import(ImportCli),
     Login,
     Logout,
+    Account(AccountCli),
     Mods(ModCli),
+}
+
+pub enum AccountAction {
+    Use(String),
+    Remove(String),
+    AddOffline(String),
+}
+
+pub struct AccountCli {
+    pub action: AccountAction,
 }
 
 pub enum ModsAction {
@@ -89,7 +100,8 @@ const USAGE: &str = concat!(
     "  import: lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <url> | --modrinth <slug>) [--pack-version <id>] [--name <instance>] [--java <path>] [--loader <fabric|forge|neoforge>] [--loader-version <v>] [--with-optional] [--dry-run] [--mirror <url>] [--maven <url>]\n",
     "  mods:   lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]\n",
     "  login:  lyys_mc_launcher login (Microsoft device code flow)\n",
-    "  logout: lyys_mc_launcher logout",
+    "  logout: lyys_mc_launcher logout\n",
+    "  account: lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>",
 );
 
 fn reject_unknown_flags(rest: &[String], known: &[(&str, bool)]) {
@@ -122,6 +134,7 @@ pub fn parse() -> Command {
         Some("import") => Command::Import(parse_import(rest)),
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
+        Some("account") => Command::Account(parse_account(rest)),
         Some("mods") => Command::Mods(parse_mods(rest)),
         _ => {
             println!("{USAGE}");
@@ -456,6 +469,30 @@ fn parse_import(rest: &[String]) -> ImportCli {
         loader,
         loader_version,
     }
+}
+
+fn parse_account(rest: &[String]) -> AccountCli {
+    fn usage() -> ! {
+        eprintln!("error: account requires use|remove <name|uuid> or add-offline <name>");
+        eprintln!("{USAGE}");
+        std::process::exit(1);
+    }
+
+    let Some(action) = rest.first().map(String::as_str) else {
+        usage();
+    };
+    let Some(value) = rest.get(1) else {
+        usage();
+    };
+
+    let action = match action {
+        "use" => AccountAction::Use(value.clone()),
+        "remove" => AccountAction::Remove(value.clone()),
+        "add-offline" => AccountAction::AddOffline(value.clone()),
+        _ => usage(),
+    };
+
+    AccountCli { action }
 }
 
 fn parse_mods(rest: &[String]) -> ModCli {

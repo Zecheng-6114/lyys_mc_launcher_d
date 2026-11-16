@@ -19,12 +19,20 @@ const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profil
 
 const EXPIRY_MARGIN: u64 = 300;
 
+#[derive(Clone)]
 pub struct MinecraftAccount {
     pub name: String,
     pub uuid: String,
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: u64,
+    pub offline: bool,
+}
+
+#[derive(Default)]
+struct AccountStore {
+    current: Option<String>,
+    accounts: Vec<MinecraftAccount>,
 }
 
 fn agent() -> &'static ureq::Agent {
@@ -46,45 +54,44 @@ fn now() -> u64 {
         .unwrap_or_default()
 }
 
-pub fn account_path() -> PathBuf {
+pub fn accounts_path() -> PathBuf {
     crate::loader::base_dir()
         .join("lyys_mc_launcher")
-        .join("account.json")
+        .join("accounts.json")
 }
 
-pub fn load_account() -> Option<MinecraftAccount> {
-    let text = std::fs::read_to_string(account_path()).ok()?;
-    let value: Value = serde_json::from_str(&text).ok()?;
-    Some(MinecraftAccount {
-        name: value["name"].as_str()?.to_string(),
-        uuid: value["uuid"].as_str()?.to_string(),
-        access_token: value["access_token"].as_str()?.to_string(),
-        refresh_token: value["refresh_token"].as_str()?.to_string(),
-        expires_at: value["expires_at"].as_u64().unwrap_or(0),
-    })
+fn read_store() -> AccountStore {
+    let Ok(text) = std::fs::read_to_string(accounts_path()) else {
+        return AccountStore::default();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return AccountStore::default();
+    };
+    let accounts = value["accounts"]
+        .as_array()
+        .map(|items| items.iter().filter_map(parse_entry).collect())
+        .unwrap_or_default();
+    AccountStore {
+        current: value["current"].as_str().map(str::to_string),
+        accounts,
+    }
 }
 
-pub fn account_name() -> Option<String> {
-    load_account().map(|account| account.name)
-}
-
-pub fn save_account(account: &MinecraftAccount) -> Result<(), String> {
-    let path = account_path();
+fn write_store(store: &AccountStore) -> Result<(), String> {
+    let path = accounts_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     }
 
+    let accounts: Vec<Value> = store.accounts.iter().map(entry_json).collect();
     let value = json!({
-        "name": account.name,
-        "uuid": account.uuid,
-        "access_token": account.access_token,
-        "refresh_token": account.refresh_token,
-        "expires_at": account.expires_at,
+        "current": store.current,
+        "accounts": accounts,
     });
     let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
 
-    let temp = path.with_file_name(format!("account-{}.tmp", std::process::id()));
+    let temp = path.with_file_name(format!("accounts-{}.tmp", std::process::id()));
     let cleanup = |error: String| {
         let _ = std::fs::remove_file(&temp);
         error
@@ -95,12 +102,112 @@ pub fn save_account(account: &MinecraftAccount) -> Result<(), String> {
         .map_err(|e| cleanup(format!("failed to write {}: {e}", path.display())))
 }
 
-pub fn logout() -> Result<(), String> {
-    let path = account_path();
-    if !path.exists() {
-        return Ok(());
+fn parse_entry(value: &Value) -> Option<MinecraftAccount> {
+    Some(MinecraftAccount {
+        name: value["name"].as_str()?.to_string(),
+        uuid: value["uuid"].as_str()?.to_string(),
+        access_token: value["access_token"].as_str().unwrap_or("").to_string(),
+        refresh_token: value["refresh_token"].as_str().unwrap_or("").to_string(),
+        expires_at: value["expires_at"].as_u64().unwrap_or(0),
+        offline: value["offline"].as_bool().unwrap_or(false),
+    })
+}
+
+fn entry_json(account: &MinecraftAccount) -> Value {
+    json!({
+        "name": account.name,
+        "uuid": account.uuid,
+        "access_token": account.access_token,
+        "refresh_token": account.refresh_token,
+        "expires_at": account.expires_at,
+        "offline": account.offline,
+    })
+}
+
+pub fn load_accounts() -> Vec<MinecraftAccount> {
+    read_store().accounts
+}
+
+pub fn current_account() -> Option<MinecraftAccount> {
+    let store = read_store();
+    if let Some(current) = store.current.as_deref()
+        && let Some(account) = store.accounts.iter().find(|item| item.uuid == current)
+    {
+        return Some(account.clone());
     }
-    std::fs::remove_file(&path).map_err(|e| format!("failed to remove {}: {e}", path.display()))
+    store.accounts.first().cloned()
+}
+
+pub fn load_account() -> Option<MinecraftAccount> {
+    current_account()
+}
+
+pub fn account_name() -> Option<String> {
+    current_account().map(|account| account.name)
+}
+
+pub fn save_account(account: &MinecraftAccount) -> Result<(), String> {
+    let mut store = read_store();
+    match store
+        .accounts
+        .iter_mut()
+        .find(|item| item.uuid == account.uuid)
+    {
+        Some(existing) => *existing = account.clone(),
+        None => store.accounts.push(account.clone()),
+    }
+    store.current = Some(account.uuid.clone());
+    write_store(&store)
+}
+
+pub fn add_offline(name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(String::from("offline account name is empty"));
+    }
+    save_account(&MinecraftAccount {
+        name: name.to_string(),
+        uuid: crate::account::offline_uuid(name),
+        access_token: String::new(),
+        refresh_token: String::new(),
+        expires_at: 0,
+        offline: true,
+    })
+}
+
+pub fn set_current(key: &str) -> Result<(), String> {
+    let mut store = read_store();
+    let index = find_index(&store, key)?;
+    store.current = Some(store.accounts[index].uuid.clone());
+    write_store(&store)
+}
+
+pub fn remove_account(key: &str) -> Result<(), String> {
+    let mut store = read_store();
+    let index = find_index(&store, key)?;
+    let removed = store.accounts.remove(index);
+    if store.current.as_deref() == Some(removed.uuid.as_str()) {
+        store.current = store.accounts.first().map(|account| account.uuid.clone());
+    }
+    write_store(&store)
+}
+
+fn find_index(store: &AccountStore, key: &str) -> Result<usize, String> {
+    let key = key.trim();
+    store
+        .accounts
+        .iter()
+        .position(|account| {
+            account.uuid.eq_ignore_ascii_case(key) || account.name.eq_ignore_ascii_case(key)
+        })
+        .ok_or_else(|| format!("account not found: {key}"))
+}
+
+pub fn logout() -> Result<(), String> {
+    let Some(current) = read_store().current else {
+        return Ok(());
+    };
+    remove_account(&current)
 }
 
 pub fn login() -> Result<(), String> {
@@ -148,6 +255,9 @@ pub fn login() -> Result<(), String> {
 }
 
 pub fn ensure_fresh(account: &mut MinecraftAccount) -> Result<(), String> {
+    if account.offline {
+        return Ok(());
+    }
     if now() + EXPIRY_MARGIN < account.expires_at {
         return Ok(());
     }
@@ -281,6 +391,7 @@ fn minecraft_session(msa_token: &str, refresh_token: &str) -> Result<MinecraftAc
         access_token: access,
         refresh_token: refresh_token.to_string(),
         expires_at: now() + expires_in,
+        offline: false,
     })
 }
 

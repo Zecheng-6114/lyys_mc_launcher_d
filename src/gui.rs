@@ -193,6 +193,11 @@ pub struct LauncherUi {
     saved_settings: Value,
     instances: Vec<InstanceRow>,
     account: Option<SharedString>,
+    accounts: Vec<crate::microsoft::MinecraftAccount>,
+    account_offline: bool,
+    account_menu_open: bool,
+    offline_form_open: bool,
+    offline_name_input: Entity<input::InputState>,
     tasks: Vec<TaskEntry>,
     active_task: Option<usize>,
     next_task_id: usize,
@@ -306,6 +311,11 @@ impl LauncherUi {
             saved_settings: Value::Null,
             instances: Vec::new(),
             account: None,
+            accounts: Vec::new(),
+            account_offline: false,
+            account_menu_open: false,
+            offline_form_open: false,
+            offline_name_input: input(window, "", cx),
             tasks: Vec::new(),
             active_task: None,
             next_task_id: 1,
@@ -479,7 +489,10 @@ impl LauncherUi {
     fn reload(&mut self, cx: &mut Context<Self>) {
         let dir = Self::value(&self.dir_input, cx);
         self.instances = list_instances(&dir);
-        self.account = crate::microsoft::account_name().map(SharedString::from);
+        self.accounts = crate::microsoft::load_accounts();
+        let current = crate::microsoft::current_account();
+        self.account_offline = current.as_ref().map(|account| account.offline).unwrap_or(false);
+        self.account = current.map(|account| SharedString::from(account.name));
         cx.notify();
     }
 
@@ -685,7 +698,15 @@ impl LauncherUi {
             String::from("--memory"),
             params.memory.unwrap_or(4096).to_string(),
         ];
-        if self.account.is_none() {
+        if self.account_offline {
+            args.push(String::from("--username"));
+            args.push(
+                self.account
+                    .as_ref()
+                    .map(|account| account.to_string())
+                    .unwrap_or_default(),
+            );
+        } else if self.account.is_none() {
             args.push(String::from("--username"));
             args.push(params.username);
         }
@@ -723,16 +744,57 @@ impl LauncherUi {
         );
     }
 
-    fn logout_microsoft(&mut self, cx: &mut Context<Self>) {
+    fn switch_account(&mut self, name: String, key: String, cx: &mut Context<Self>) {
         if let Some(id) = self.running_task_for(ACCOUNT_TASK) {
             self.active_task = Some(id);
             cx.notify();
             return;
         }
+        let title = self.t_args("task.title.account", &[("name", &name)]);
         self.start_task(
-            self.t("task.title.logout"),
+            title,
             Some(SharedString::from(ACCOUNT_TASK)),
-            vec![String::from("logout")],
+            vec![String::from("account"), String::from("use"), key],
+            true,
+            None,
+            cx,
+        );
+    }
+
+    fn remove_account(&mut self, name: String, key: String, cx: &mut Context<Self>) {
+        if let Some(id) = self.running_task_for(ACCOUNT_TASK) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
+        let title = self.t_args("task.title.account.remove", &[("name", &name)]);
+        self.start_task(
+            title,
+            Some(SharedString::from(ACCOUNT_TASK)),
+            vec![String::from("account"), String::from("remove"), key],
+            true,
+            None,
+            cx,
+        );
+    }
+
+    fn add_offline_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = Self::value(&self.offline_name_input, cx).trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(id) = self.running_task_for(ACCOUNT_TASK) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
+        Self::set_input(&self.offline_name_input, "", window, cx);
+        self.offline_form_open = false;
+        let title = self.t_args("task.title.account.add", &[("name", &name)]);
+        self.start_task(
+            title,
+            Some(SharedString::from(ACCOUNT_TASK)),
+            vec![String::from("account"), String::from("add-offline"), name],
             true,
             None,
             cx,
@@ -860,7 +922,7 @@ impl LauncherUi {
             cx.notify();
             return;
         }
-        let _ = Command::new("explorer").arg(path).spawn();
+        let _ = open_directory(&path);
         cx.notify();
     }
 
@@ -2313,6 +2375,21 @@ fn dot(color: u32, size: f32) -> Div {
         .bg(skin::c(color))
 }
 
+#[cfg(target_os = "windows")]
+fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+    Command::new("explorer").arg(path).spawn()
+}
+
+#[cfg(target_os = "macos")]
+fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+    Command::new("open").arg(path).spawn()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+    Command::new("xdg-open").arg(path).spawn()
+}
+
 fn panel() -> Div {
     div()
         .w_full()
@@ -2529,6 +2606,14 @@ impl LauncherUi {
                 ),
             )
             .child(self.side_nav(
+                "nav-accounts",
+                IconName::User,
+                self.t("nav.accounts"),
+                self.tab == 4,
+                4,
+                cx,
+            ))
+            .child(self.side_nav(
                 "nav-settings",
                 IconName::Settings,
                 self.t("nav.settings"),
@@ -2617,6 +2702,7 @@ impl LauncherUi {
                 0 => self.render_instances(cx).into_any_element(),
                 1 => self.render_download(cx).into_any_element(),
                 3 => self.render_tasks(cx).into_any_element(),
+                4 => self.render_accounts(cx).into_any_element(),
                 _ => self.render_general_settings(cx).into_any_element(),
             },
         }
@@ -3159,6 +3245,206 @@ impl LauncherUi {
             .child(lang.native_name())
     }
 
+    fn render_accounts(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = crate::microsoft::current_account()
+            .map(|account| account.uuid)
+            .unwrap_or_default();
+
+        let mut body = v_flex().gap(px(16.));
+
+        if self.account_menu_open {
+            body = body.child(
+                panel()
+                    .child(
+                        h_flex()
+                            .id("account-add-microsoft")
+                            .w_full()
+                            .h(px(42.))
+                            .px(px(20.))
+                            .items_center()
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|style| style.bg(skin::c(skin::HOVER)))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.account_menu_open = false;
+                                this.login_microsoft(cx);
+                            }))
+                            .child(row_title(self.t("accounts.add.microsoft"))),
+                    )
+                    .child(sep())
+                    .child(
+                        h_flex()
+                            .id("account-add-offline")
+                            .w_full()
+                            .h(px(42.))
+                            .px(px(20.))
+                            .items_center()
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|style| style.bg(skin::c(skin::HOVER)))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.account_menu_open = false;
+                                this.offline_form_open = true;
+                                cx.notify();
+                            }))
+                            .child(row_title(self.t("accounts.add.offline"))),
+                    ),
+            );
+        }
+
+        if self.offline_form_open {
+            body = body.child(
+                panel()
+                    .child(
+                        row()
+                            .child(row_title(self.t("accounts.offline.name")))
+                            .child(self.input_control(&self.offline_name_input)),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_end()
+                            .gap(px(8.))
+                            .px(px(20.))
+                            .pb(px(14.))
+                            .child(
+                                text_button("offline-cancel", self.t("common.cancel")).on_click(
+                                    cx.listener(|this, _, _, cx| {
+                                        this.offline_form_open = false;
+                                        cx.notify();
+                                    }),
+                                ),
+                            )
+                            .child(
+                                primary_button("offline-add", self.t("common.add")).on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.add_offline_account(window, cx)
+                                    }),
+                                ),
+                            ),
+                    ),
+            );
+        }
+
+        let mut list = panel();
+        if self.accounts.is_empty() {
+            list = list.child(
+                div()
+                    .px(px(20.))
+                    .py(px(16.))
+                    .text_size(px(12.5))
+                    .text_color(skin::c(skin::MUTED))
+                    .child(self.t("accounts.empty")),
+            );
+        } else {
+            for (index, account) in self.accounts.iter().enumerate() {
+                if index > 0 {
+                    list = list.child(sep());
+                }
+
+                let name = account.name.clone();
+                let key = account.uuid.clone();
+                let is_current = account.uuid == current;
+                let desc = if account.offline {
+                    self.t_args("accounts.uuid.offline", &[("uuid", &account.uuid)])
+                } else {
+                    self.t_args("accounts.uuid", &[("uuid", &account.uuid)])
+                };
+
+                let mut actions = h_flex().gap(px(8.));
+                if is_current {
+                    actions = actions.child(
+                        div()
+                            .h(px(24.))
+                            .px(px(8.))
+                            .rounded(px(6.))
+                            .flex()
+                            .items_center()
+                            .bg(skin::c(skin::FIELD))
+                            .text_size(px(11.5))
+                            .text_color(skin::c(skin::MUTED))
+                            .child(self.t("accounts.current")),
+                    );
+                } else {
+                    let use_name = name.clone();
+                    let use_key = key.clone();
+                    actions = actions.child(
+                        text_button(
+                            SharedString::from(format!("account-use-{key}")),
+                            self.t("accounts.switch"),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.switch_account(use_name.clone(), use_key.clone(), cx)
+                        })),
+                    );
+                }
+
+                let remove_name = name.clone();
+                let remove_key = key.clone();
+                actions = actions.child(
+                    danger_button(
+                        SharedString::from(format!("account-remove-{key}")),
+                        self.t("accounts.remove"),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.remove_account(remove_name.clone(), remove_key.clone(), cx)
+                    })),
+                );
+
+                list = list.child(
+                    row()
+                        .child(row_text(SharedString::from(name), desc))
+                        .child(actions),
+                );
+            }
+        }
+        body = body.child(list);
+
+        v_flex()
+            .size_full()
+            .gap(px(20.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
+                    .child(page_title(self.t("page.accounts.title")))
+                    .child(
+                        h_flex()
+                            .id("account-add")
+                            .h(px(30.))
+                            .px(px(12.))
+                            .rounded(px(7.))
+                            .items_center()
+                            .gap(px(6.))
+                            .bg(skin::c(skin::ACCENT))
+                            .text_color(skin::c(skin::ACCENT_FG))
+                            .text_size(px(12.5))
+                            .font_medium()
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|style| style.bg(skin::c(skin::ACCENT_HOVER)))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.account_menu_open = !this.account_menu_open;
+                                this.offline_form_open = false;
+                                cx.notify();
+                            }))
+                            .child(self.t("accounts.add"))
+                            .child(
+                                Icon::new(IconName::ArrowDown)
+                                    .with_size(px(13.))
+                                    .text_color(skin::c(skin::ACCENT_FG)),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .id("accounts-scroll")
+                    .overflow_y_scroll()
+                    .pb(px(6.))
+                    .child(body),
+            )
+    }
+
     fn render_general_settings(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
@@ -3174,13 +3460,6 @@ impl LauncherUi {
                     .child(
                         v_flex()
                             .gap(px(16.))
-                            .child(
-                                panel().child(
-                                    row()
-                                        .child(row_title(self.t("settings.account.title")))
-                                        .child(self.account_controls(cx)),
-                                ),
-                            )
                             .child(
                                 panel()
                                     .child(
@@ -3291,42 +3570,6 @@ impl LauncherUi {
                             )),
                     ),
             )
-    }
-
-    fn account_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let logged_in = self.account.is_some();
-        let name = self
-            .account
-            .clone()
-            .unwrap_or_else(|| self.t("settings.account.none"));
-        h_flex()
-            .flex_shrink_0()
-            .items_center()
-            .gap(px(10.))
-            .child(
-                div()
-                    .max_w(px(220.))
-                    .truncate()
-                    .text_size(px(13.))
-                    .text_color(skin::c(if logged_in {
-                        skin::TEXT
-                    } else {
-                        skin::MUTED
-                    }))
-                    .child(name),
-            )
-            .child(
-                text_button("login-microsoft", self.t("settings.account.login")).on_click(
-                    cx.listener(|this, _, _, cx| this.login_microsoft(cx)),
-                ),
-            )
-            .when(logged_in, |this| {
-                this.child(
-                    danger_button("logout-microsoft", self.t("settings.account.logout")).on_click(
-                        cx.listener(|this, _, _, cx| this.logout_microsoft(cx)),
-                    ),
-                )
-            })
     }
 
     fn render_version_picker_for(

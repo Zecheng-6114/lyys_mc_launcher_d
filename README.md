@@ -18,6 +18,7 @@
 - **完整性校验**：下载文件带 SHA1 / SHA512 校验与重试
 - **离线启动**：由用户名派生离线 UUID
 - **正版登录**：微软设备码流程登录，验证码自动复制并打开浏览器，令牌自动续期；已登录时启动自动使用正版身份，`--offline` / `--username` 可强制离线
+- **账号管理**：图形界面「账号」页可添加微软账号与离线账号，切换当前账号或删除；启动时自动使用所选账号
 - **多语言**：简体中文 / English / 日本語
 - **任务并行**：图形界面支持多任务并行执行与实时日志
 
@@ -51,6 +52,7 @@ import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <ur
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
+account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
 ```
 
 示例：
@@ -65,6 +67,12 @@ lyys_mc_launcher launch --dir D:\game\minecraft --name 1.21.4-fabric --username 
 
 # 微软正版登录（浏览器打开链接并输入代码后自动完成）
 lyys_mc_launcher login
+
+# 添加离线账号并设为当前账号
+lyys_mc_launcher account add-offline Steve
+
+# 在各账号之间切换
+lyys_mc_launcher account use Steve
 
 # 从 Modrinth 导入整合包
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
@@ -94,7 +102,7 @@ lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 
 - `versions/<实例>/launch.json`：实例级启动参数（用户名、内存、Java、镜像、隔离）
 - `versions/<实例>/lyys-instance.json`：实例元数据（隔离标记、整合包来源记录）
-- `<基目录>/lyys_mc_launcher/account.json`：微软正版登录令牌（由 `login` 写入，启动时自动使用）
+- `<基目录>/lyys_mc_launcher/accounts.json`：账号列表与当前账号（微软令牌与离线账号，由 `login` / `account` 写入，启动时自动使用当前账号）
 
 运行日志写入 `<基目录>/lyys_mc_launcher/log/`。
 

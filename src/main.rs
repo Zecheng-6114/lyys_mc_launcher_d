@@ -35,6 +35,7 @@ fn main() {
             cli::Command::Import(c) => run_import(&c),
             cli::Command::Login => run_login(),
             cli::Command::Logout => run_logout(),
+            cli::Command::Account(c) => run_account(&c),
             cli::Command::Mods(c) => run_mods(&c),
         }
         return;
@@ -77,6 +78,24 @@ fn run_logout() {
             eprintln!("logout failed: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+fn run_account(c: &cli::AccountCli) {
+    let result = match &c.action {
+        cli::AccountAction::Use(key) => microsoft::set_current(key).map(|_| {
+            let name = microsoft::account_name().unwrap_or_else(|| key.clone());
+            println!("current account: {name}");
+        }),
+        cli::AccountAction::Remove(key) => microsoft::remove_account(key)
+            .map(|_| println!("removed account: {key}")),
+        cli::AccountAction::AddOffline(name) => microsoft::add_offline(name)
+            .map(|_| println!("added offline account: {}", name.trim())),
+    };
+
+    if let Err(e) = result {
+        eprintln!("account failed: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -456,7 +475,11 @@ fn resolve_identity(c: &LaunchCli) -> Result<(String, String, String), String> {
         return Err(String::from("--offline requires --username"));
     }
 
-    if let Some(mut account) = microsoft::load_account() {
+    if let Some(account) = microsoft::load_account() {
+        if account.offline {
+            return Ok((account.name, account.uuid, String::from("0")));
+        }
+        let mut account = account;
         microsoft::ensure_fresh(&mut account)?;
         return Ok((account.name, account.uuid, account.access_token));
     }

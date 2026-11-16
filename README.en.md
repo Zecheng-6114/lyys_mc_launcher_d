@@ -18,6 +18,7 @@ A Minecraft launcher built with Rust and GPUI, offering both a graphical interfa
 - **Integrity checks**: downloads are verified with SHA1 / SHA512 and retried on failure
 - **Offline play**: derives an offline UUID from the username
 - **Microsoft sign-in**: official login via the device code flow with the verification code auto-copied and the browser opened automatically, with automatic token refresh; when signed in, launching uses the official identity automatically
+- **Account management**: add Microsoft and offline accounts, switch the current account, or remove one from the Accounts page; launching uses the selected account automatically
 - **Multilingual**: Simplified Chinese / English / Japanese
 - **Parallel tasks**: the graphical interface supports running multiple tasks in parallel with live logs
 
@@ -51,6 +52,7 @@ import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <ur
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
+account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
 ```
 
 Examples:
@@ -65,6 +67,12 @@ lyys_mc_launcher launch --dir D:\game\minecraft --name 1.21.4-fabric --username 
 
 # Sign in with a Microsoft account (open the link in a browser and enter the code)
 lyys_mc_launcher login
+
+# Add an offline account and make it current
+lyys_mc_launcher account add-offline Steve
+
+# Switch between accounts
+lyys_mc_launcher account use Steve
 
 # Import a modpack from Modrinth
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
@@ -94,7 +102,7 @@ Each instance can also have its own configuration:
 
 - `versions/<instance>/launch.json`: per-instance launch settings (username, memory, Java, mirrors, isolation)
 - `versions/<instance>/lyys-instance.json`: instance metadata (isolation flag, modpack provenance)
-- `<base dir>/lyys_mc_launcher/account.json`: Microsoft sign-in tokens (written by `login`, used automatically at launch)
+- `<base dir>/lyys_mc_launcher/accounts.json`: account list and current account (Microsoft tokens and offline accounts, written by `login` / `account`, used automatically at launch)
 
 Run logs are written to `<base dir>/lyys_mc_launcher/log/`.
 

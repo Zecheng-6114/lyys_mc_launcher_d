@@ -18,6 +18,7 @@ Rust と GPUI で構築された Minecraft ランチャー。グラフィカル�
 - **整合性チェック**：ダウンロードファイルは SHA1 / SHA512 検証とリトライ付き
 - **オフライン起動**：ユーザー名からオフライン UUID を生成
 - **正規ログイン**：Microsoft のデバイスコードフローでログイン。認証コードは自動コピーでブラウザも自動的に開き、トークンは自動更新、ログイン済みなら起動時に正規アカウントを自動使用
+- **アカウント管理**：アカウントページで Microsoft アカウントとオフラインアカウントを追加し、現在のアカウントの切り替えや削除が可能。起動時は選択中のアカウントを自動使用
 - **多言語対応**：簡体字中国語 / 英語 / 日本語
 - **並行タスク**：GUI は複数タスクの並行実行とリアルタイムログに対応
 
@@ -51,6 +52,7 @@ import:   lyys_mc_launcher import --dir <game_dir> (--file <archive> | --url <ur
 mods:     lyys_mc_launcher mods list|remove|toggle --dir <game_dir> --name <instance> [--mod <id,file,...>]
 login:    lyys_mc_launcher login
 logout:   lyys_mc_launcher logout
+account:  lyys_mc_launcher account use|remove <name|uuid> | account add-offline <name>
 ```
 
 例：
@@ -65,6 +67,12 @@ lyys_mc_launcher launch --dir D:\game\minecraft --name 1.21.4-fabric --username 
 
 # Microsoft アカウントでログイン（ブラウザでリンクを開きコードを入力）
 lyys_mc_launcher login
+
+# オフラインアカウントを追加して現在のアカウントに設定
+lyys_mc_launcher account add-offline Steve
+
+# アカウントを切り替え
+lyys_mc_launcher account use Steve
 
 # Modrinth から統合パックをインポート
 lyys_mc_launcher import --dir D:\game\minecraft --modrinth <pack-slug>
@@ -94,7 +102,7 @@ lyys_mc_launcher mods list --dir D:\game\minecraft --name <instance>
 
 - `versions/<インスタンス>/launch.json`：インスタンスごとの起動設定（ユーザー名、メモリ、Java、ミラー、分離）
 - `versions/<インスタンス>/lyys-instance.json`：インスタンスのメタデータ（分離フラグ、統合パックの記録）
-- `<基準ディレクトリ>/lyys_mc_launcher/account.json`：Microsoft ログイントークン（`login` で書き込み、起動時に自動使用）
+- `<基準ディレクトリ>/lyys_mc_launcher/accounts.json`：アカウント一覧と現在のアカウント（Microsoft トークンとオフラインアカウント。`login` / `account` で書き込み、起動時に現在のアカウントを自動使用）
 
 実行ログは `<基準ディレクトリ>/lyys_mc_launcher/log/` に書き込まれます。
 
