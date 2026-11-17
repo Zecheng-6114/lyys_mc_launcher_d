@@ -323,6 +323,29 @@ body {
   color: var(--faint);
 }
 
+.btn:active {
+  background: var(--active);
+}
+
+.btn-primary:active {
+  background: var(--accent-active);
+}
+
+.btn-danger:active {
+  background: var(--danger-hover);
+}
+
+.btn-text:active,
+.nav-item:active,
+.item:active,
+.task-item:active {
+  background: var(--active);
+}
+
+.seg:active {
+  background: var(--hover);
+}
+
 .segmented {
   display: flex;
   flex-direction: row;

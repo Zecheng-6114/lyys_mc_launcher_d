@@ -1,4 +1,3 @@
-//! 新界面的通用控件与小部件。
 
 use dioxus::prelude::*;
 

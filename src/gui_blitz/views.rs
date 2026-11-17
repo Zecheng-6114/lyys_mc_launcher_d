@@ -1,4 +1,3 @@
-//! 实例、设置、账号与任务页面的渲染。
 
 use dioxus::prelude::*;
 
@@ -6,8 +5,8 @@ use super::widgets::{separator, text_input, toggle_switch};
 use super::{
     LoadState, PathTarget, State, TaskState, auto_select_instance_java, back_to_instances,
     cancel_task, detect_java, launch_instance, load_mods, login_microsoft, open_folder,
-    open_instance_settings, pick_java_runtime, pick_path, remove_account, remove_mod,
-    save_instance_settings, switch_account, toggle_mod,
+    open_instance_settings, pick_java_runtime, pick_path, refresh, remove_account, remove_mod,
+    save_instance_settings, save_settings, select_language, switch_account, toggle_mod,
 };
 
 fn row_title(text: String) -> Element {
@@ -39,12 +38,11 @@ pub fn page(state: Signal<State>) -> Element {
     }
 }
 
-// ---------- 实例 ----------
 
-fn instances(mut state: Signal<State>) -> Element {
+fn instances(state: Signal<State>) -> Element {
     let current = state.read();
     let title = current.t("page.instances.title");
-    let refresh = current.t("common.refresh");
+    let refresh_label = current.t("common.refresh");
     let empty = current.t("instances.empty");
     let launch_label = current.t("instances.action.launch");
     let cancel_label = current.t("instances.action.cancel");
@@ -76,11 +74,8 @@ fn instances(mut state: Signal<State>) -> Element {
                 div { class: "group",
                     div {
                         class: "btn-text",
-                        onclick: move |_| {
-                            let mut current = state.write();
-                            current.reload();
-                        },
-                        "{refresh}"
+                        onclick: move |_| refresh(state),
+                        "{refresh_label}"
                     }
                 }
             }
@@ -146,7 +141,6 @@ fn instances(mut state: Signal<State>) -> Element {
     }
 }
 
-// ---------- 通用设置 ----------
 
 fn settings(mut state: Signal<State>) -> Element {
     let current = state.read();
@@ -322,7 +316,7 @@ fn settings(mut state: Signal<State>) -> Element {
                                                 class: "{class}",
                                                 onclick: move |_| {
                                                     if let Some(target) = crate::i18n::Lang::from_tag(code) {
-                                                        state.write().select_language(target);
+                                                        select_language(state, target);
                                                     }
                                                 },
                                                 "{label}"
@@ -342,9 +336,8 @@ fn settings(mut state: Signal<State>) -> Element {
                             toggle_switch {
                                 checked: experimental,
                                 on_toggle: move |checked| {
-                                    let mut current = state.write();
-                                    current.experimental_ui = checked;
-                                    current.save_settings();
+                                    state.write().experimental_ui = checked;
+                                    save_settings(state);
                                 },
                             }
                         }
@@ -364,7 +357,7 @@ fn settings(mut state: Signal<State>) -> Element {
                         } else {
                             div {
                                 class: "btn btn-primary",
-                                onclick: move |_| state.write().save_settings(),
+                                onclick: move |_| save_settings(state),
                                 "{save_label}"
                             }
                         }
@@ -375,7 +368,6 @@ fn settings(mut state: Signal<State>) -> Element {
     }
 }
 
-// ---------- 账号 ----------
 
 fn accounts(mut state: Signal<State>) -> Element {
     let current = state.read();
@@ -523,7 +515,6 @@ fn accounts(mut state: Signal<State>) -> Element {
     }
 }
 
-// ---------- 任务 ----------
 
 fn task_state_key(state: TaskState) -> &'static str {
     match state {
@@ -665,7 +656,6 @@ fn tasks(mut state: Signal<State>) -> Element {
     }
 }
 
-// ---------- 实例设置 ----------
 
 fn instance_settings_page(mut state: Signal<State>) -> Element {
     let current = state.read();

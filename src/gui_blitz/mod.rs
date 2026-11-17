@@ -1,8 +1,3 @@
-//! 实验性界面：Dioxus + Blitz（原生 HTML/CSS 渲染）。
-//!
-//! 与 [`crate::gui`] 并行存在，由配置项 `experimental_ui` 或启动参数
-//! `--ui blitz` 选择。业务侧仍复用 `crate::gui` 中的任务执行、配置读写与
-//! 实例扫描逻辑，本模块只负责界面表达与状态持有。
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -33,8 +28,8 @@ pub(crate) const CONFIG_TASK: &str = "microsoft";
 pub fn run() -> Result<(), Box<dyn Error>> {
     let attributes = dioxus::native::WindowAttributes::default()
         .with_title("LYYS MC Launcher")
-        .with_surface_size(dioxus::native::LogicalSize::new(1180.0, 800.0))
-        .with_min_surface_size(dioxus::native::LogicalSize::new(980.0, 640.0));
+        .with_inner_size(dioxus::native::LogicalSize::new(1180.0, 800.0))
+        .with_min_inner_size(dioxus::native::LogicalSize::new(980.0, 640.0));
     let config = dioxus::native::Config::new().with_window_attributes(attributes);
     dioxus::native::launch_cfg_with_props(app, (), vec![], vec![Box::new(config)]);
     Ok(())
@@ -78,6 +73,7 @@ pub(crate) struct State {
     pub language: Option<String>,
     pub saved_settings: serde_json::Value,
     pub experimental_ui: bool,
+    pub user_java: Vec<String>,
 
     pub instances: Vec<InstanceRow>,
     pub account: Option<String>,
@@ -175,6 +171,7 @@ impl State {
             language: settings.language.clone(),
             saved_settings: serde_json::Value::Null,
             experimental_ui: settings.experimental_ui,
+            user_java: crate::java::user_paths(),
             instances: Vec::new(),
             account: None,
             accounts: Vec::new(),
@@ -247,7 +244,6 @@ impl State {
             download_instance_picker: false,
         };
         state.saved_settings = state.settings_value();
-        state.reload();
         state
     }
 
@@ -276,39 +272,8 @@ impl State {
         if let Some(language) = &self.language {
             value["language"] = serde_json::json!(language);
         }
-        value["user_java"] = serde_json::json!(crate::java::user_paths());
+        value["user_java"] = serde_json::json!(self.user_java);
         value
-    }
-
-    fn reload(&mut self) {
-        self.instances = list_instances(self.dir.trim());
-        self.accounts = crate::microsoft::load_accounts();
-        let current = crate::microsoft::current_account();
-        self.account_offline = current.as_ref().map(|a| a.offline).unwrap_or(false);
-        self.account = current.map(|account| account.name);
-    }
-
-    pub fn save_settings(&mut self) {
-        let value = self.settings_value();
-        if value == self.saved_settings {
-            return;
-        }
-        if write_json(&crate::gui::config_path(), &value, self.lang).is_ok() {
-            self.saved_settings = value;
-        }
-        self.reload();
-    }
-
-    pub fn select_language(&mut self, lang: Lang) {
-        if self.lang == lang {
-            return;
-        }
-        self.lang = lang;
-        self.language = Some(lang.tag().to_string());
-        let value = self.settings_value();
-        if write_json(&crate::gui::config_path(), &value, lang).is_ok() {
-            self.saved_settings = value;
-        }
     }
 
     fn running_task_for(&self, name: &str) -> Option<usize> {
@@ -444,6 +409,7 @@ impl State {
 #[component]
 fn app() -> Element {
     let state = use_signal(State::new);
+    use_hook(|| refresh(state));
     let nav_system = state.read().t("nav.section.system");
     let version = env!("CARGO_PKG_VERSION");
     let running = state
@@ -481,7 +447,6 @@ fn app() -> Element {
     }
 }
 
-// ---------- 后台任务与界面动作 ----------
 
 fn background<T, F>(work: F) -> smol::channel::Receiver<T>
 where
@@ -619,8 +584,9 @@ fn start_task(
             }
         }
         let mut refresh_mods = false;
+        let mut needs_refresh = false;
         if refresh {
-            current.reload();
+            needs_refresh = true;
             let task_instance = current
                 .tasks
                 .iter()
@@ -631,8 +597,74 @@ fn start_task(
         }
         let cfg_name = current.cfg_name.clone();
         drop(current);
+        if needs_refresh {
+            crate::gui_blitz::refresh(state);
+        }
         if refresh_mods {
             load_mods(state, cfg_name);
+        }
+    });
+}
+
+fn refresh(mut state: Signal<State>) {
+    let dir = state.read().dir.trim().to_string();
+    let rx = background(move || {
+        let instances = list_instances(&dir);
+        let accounts = crate::microsoft::load_accounts();
+        let current = crate::microsoft::current_account();
+        let user_java = crate::java::user_paths();
+        (instances, accounts, current, user_java)
+    });
+    spawn_apply(rx, move |(instances, accounts, current, user_java)| {
+        let mut current_state = state.write();
+        current_state.instances = instances;
+        current_state.accounts = accounts;
+        current_state.account_offline = current.as_ref().map(|a| a.offline).unwrap_or(false);
+        current_state.account = current.map(|account| account.name);
+        current_state.user_java = user_java;
+    });
+}
+
+fn refresh_instances(mut state: Signal<State>) {
+    let dir = state.read().dir.trim().to_string();
+    spawn_apply(background(move || list_instances(&dir)), move |rows| {
+        state.write().instances = rows;
+    });
+}
+
+fn save_settings(mut state: Signal<State>) {
+    let (value, lang) = {
+        let current = state.read();
+        (current.settings_value(), current.lang)
+    };
+    if value == state.read().saved_settings {
+        return;
+    }
+    let written = value.clone();
+    let rx = background(move || write_json(&crate::gui::config_path(), &written, lang));
+    spawn_apply(rx, move |result| {
+        if result.is_ok() {
+            state.write().saved_settings = value.clone();
+        }
+        refresh(state);
+    });
+}
+
+fn select_language(mut state: Signal<State>, lang: Lang) {
+    {
+        let mut current = state.write();
+        if current.lang == lang {
+            return;
+        }
+        current.lang = lang;
+        current.language = Some(lang.tag().to_string());
+    }
+    let value = state.read().settings_value();
+    let written = value.clone();
+    let rx = background(move || write_json(&crate::gui::config_path(), &written, lang));
+    spawn_apply(rx, move |result| {
+        if result.is_ok() {
+            state.write().saved_settings = value.clone();
         }
     });
 }
@@ -651,8 +683,7 @@ fn cancel_task(mut state: Signal<State>, id: usize) {
     }
 }
 
-fn effective_launch(state: &State, name: &str) -> (String, LaunchParams) {
-    let dir = state.dir.trim().to_string();
+fn effective_launch(state: &State, name: &str) -> (String, LaunchParams) {    let dir = state.dir.trim().to_string();
     let config = instance::read_launch_config(&dir, name);
     let params = LaunchParams {
         memory: config.memory.or_else(|| state.memory_value(&state.memory)),
@@ -1339,21 +1370,31 @@ fn add_mod(mut state: Signal<State>) {
 }
 
 fn open_instance_settings(mut state: Signal<State>, name: String) {
-    let (dir, config, required) = {
+    let dir = {
         let current = state.read();
         let dir = current.dir.trim().to_string();
         if dir.is_empty() {
             return;
         }
-        let config = instance::read_launch_config(&dir, &name);
-        let required = crate::version::resolve(&dir, &name)
-            .ok()
-            .map(|resolved| crate::java::required_major_for_version(&resolved.json));
-        (dir, config, required)
+        dir
     };
     {
         let mut current = state.write();
         current.cfg_name = name.clone();
+        current.mods = Vec::new();
+        current.instance_page = 2;
+    }
+    let load_name = name.clone();
+    let rx = background(move || {
+        let config = instance::read_launch_config(&dir, &load_name);
+        let required = crate::version::resolve(&dir, &load_name)
+            .ok()
+            .map(|resolved| crate::java::required_major_for_version(&resolved.json));
+        let isolated = instance::is_isolated(&dir, &load_name);
+        (config, required, isolated)
+    });
+    spawn_apply(rx, move |(config, required, isolated)| {
+        let mut current = state.write();
         current.cfg_memory = config
             .memory
             .map(|value| value.to_string())
@@ -1361,14 +1402,12 @@ fn open_instance_settings(mut state: Signal<State>, name: String) {
         current.cfg_java = config.java.clone().unwrap_or_default();
         current.cfg_mirror = config.mirror.clone().unwrap_or_default();
         current.cfg_maven = config.maven.clone().unwrap_or_default();
-        current.cfg_isolate = instance::is_isolated(&dir, &name);
+        current.cfg_isolate = isolated;
         current.cfg_isolate_local = config.isolate.is_some();
         current.cfg_java_required = required;
         current.cfg_java_note = None;
         current.cfg_saved = config;
-        current.mods = Vec::new();
-        current.instance_page = 2;
-    }
+    });
     load_mods(state, name);
 }
 
@@ -1388,14 +1427,16 @@ fn save_instance_settings(mut state: Signal<State>) {
         isolate: Some(state.read().cfg_isolate),
         ..config
     };
-    let _ = instance::write_launch_config(&dir, &name, &config);
     {
         let mut current = state.write();
         current.cfg_isolate_local = true;
-        current.cfg_saved = config;
+        current.cfg_saved = config.clone();
     }
+    let write_name = name.clone();
+    let rx = background(move || instance::write_launch_config(&dir, &write_name, &config));
+    spawn_apply(rx, move |_| {});
     load_mods(state, name);
-    state.write().reload();
+    refresh(state);
 }
 
 fn detect_java(mut state: Signal<State>) {
@@ -1427,8 +1468,8 @@ fn pick_java_runtime(mut state: Signal<State>, index: usize) {
         let mut current = state.write();
         current.java = path;
         current.java_picker = false;
-        current.save_settings();
     }
+    save_settings(state);
 }
 
 fn auto_select_instance_java(mut state: Signal<State>) {
@@ -1455,7 +1496,6 @@ fn auto_select_instance_java(mut state: Signal<State>) {
     });
 }
 
-// ---------- 缩略图 data: URI ----------
 
 fn data_uri(url: &str, bytes: &[u8]) -> String {
     let path = url.split(['?', '#']).next().unwrap_or(url);

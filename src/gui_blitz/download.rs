@@ -1,4 +1,3 @@
-//! 下载页：实例安装、整合包导入、内容搜索与项目详情。
 
 use dioxus::prelude::*;
 
@@ -6,7 +5,7 @@ use super::widgets::{initial, list_logo, separator, text_input, toggle_switch};
 use super::{
     LoadState, PathTarget, State, add_mod, import_modrinth, import_pack, install_version,
     load_game_versions, load_loader_versions, load_mod_versions, open_mod_detail, pick_path,
-    search_mods,
+    refresh_instances, search_mods,
 };
 use crate::gui::clip_text;
 use crate::modrinth;
@@ -628,8 +627,8 @@ fn content_search(mut state: Signal<State>) -> Element {
                         onclick: move |_| {
                             let mut current = state.write();
                             current.download_instance_picker = !current.download_instance_picker;
-                            let dir = current.dir.trim().to_string();
-                            current.instances = crate::gui::list_instances(&dir);
+                            drop(current);
+                            refresh_instances(state);
                         },
                         "{pick_label}"
                     }
@@ -1025,8 +1024,8 @@ fn project_detail(mut state: Signal<State>, hit: modrinth::Hit, pack: bool) -> E
                             onclick: move |_| {
                                 let mut current = state.write();
                                 current.download_instance_picker = !current.download_instance_picker;
-                                let dir = current.dir.trim().to_string();
-                                current.instances = crate::gui::list_instances(&dir);
+                                drop(current);
+                                refresh_instances(state);
                             },
                             "{pick_label}"
                         }
