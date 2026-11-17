@@ -291,7 +291,8 @@ fn run_download(c: &DownloadCli) {
         None => {
             let instance = c.name.clone().unwrap_or_else(|| c.version.clone());
             if let Err(e) = loader::validate_instance_id(&instance) {
-                return eprintln!("{}", e);
+                eprintln!("{}", e);
+                std::process::exit(1);
             }
             match download::download_instance(&mc_dir, &instance, &c.version, &origins) {
                 Ok(()) => Ok(instance),
@@ -361,7 +362,7 @@ fn run_import(c: &ImportCli) {
         }
     } else {
         eprintln!("error: import requires --file, --url or --modrinth");
-        return;
+        std::process::exit(1);
     };
 
     let origins = download::Origins {
@@ -375,7 +376,7 @@ fn run_import(c: &ImportCli) {
         Some("neoforge") => Some(modpack::LoaderKind::NeoForge),
         Some(other) => {
             eprintln!("unsupported loader: {other}");
-            return;
+            std::process::exit(1);
         }
         None => None,
     };
@@ -458,34 +459,34 @@ fn run_launch(c: &LaunchCli) {
     let java = launch::resolve_java(c.java.as_deref(), java::required_major_for_version(version));
     if let Err(e) = launch::check_java(&java, version) {
         eprintln!("{}", e);
-        return;
+        std::process::exit(1);
     }
 
     let (username, uuid, access_token) = match resolve_identity(c) {
         Ok(identity) => identity,
         Err(e) => {
             eprintln!("{e}");
-            return;
+            std::process::exit(1);
         }
     };
 
     if let Err(e) = download::ensure_version_files(mc_dir, version, &resolved.jar_id, &origins) {
         eprintln!("failed to complete files: {}", e);
-        return;
+        std::process::exit(1);
     }
     if let Err(e) = download::ensure_assets(mc_dir, version, &origins) {
         eprintln!("failed to complete assets: {}", e);
-        return;
+        std::process::exit(1);
     }
-    if let Err(e) = launch::prepare_natives(mc_dir, version) {
+    if let Err(e) = launch::prepare_natives(mc_dir, version, &resolved.jar_id) {
         eprintln!("failed to prepare natives: {}", e);
-        return;
+        std::process::exit(1);
     }
 
     let game_dir = instance::game_dir(mc_dir, &c.instance, c.isolate);
     if let Err(e) = std::fs::create_dir_all(&game_dir) {
         eprintln!("failed to create game directory {}: {}", game_dir, e);
-        return;
+        std::process::exit(1);
     }
 
     let opts = LaunchOptions {
@@ -509,8 +510,14 @@ fn run_launch(c: &LaunchCli) {
 
     match status {
         Ok(status) if status.success() => {}
-        Ok(status) => eprintln!("game exited with {status}"),
-        Err(e) => eprintln!("failed to launch {java}: {e}"),
+        Ok(status) => {
+            eprintln!("game exited with {status}");
+            std::process::exit(status.code().unwrap_or(1));
+        }
+        Err(e) => {
+            eprintln!("failed to launch {java}: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

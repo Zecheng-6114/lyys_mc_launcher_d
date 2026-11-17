@@ -159,6 +159,8 @@ struct TaskEntry {
     id: usize,
     title: SharedString,
     instance: Option<SharedString>,
+    command: String,
+    key: String,
     state: TaskState,
     progress: Option<f32>,
     log_lines: VecDeque<SharedString>,
@@ -546,6 +548,24 @@ impl LauncherUi {
             .map(|task| task.id)
     }
 
+    fn running_launch_for(&self, name: &str) -> Option<usize> {
+        self.tasks
+            .iter()
+            .find(|task| {
+                task.state == TaskState::Running
+                    && task.command == "launch"
+                    && task.instance.as_deref() == Some(name)
+            })
+            .map(|task| task.id)
+    }
+
+    fn running_task_with_key(&self, key: &str) -> Option<usize> {
+        self.tasks
+            .iter()
+            .find(|task| task.state == TaskState::Running && task.key == key)
+            .map(|task| task.id)
+    }
+
     fn start_task(
         &mut self,
         title: SharedString,
@@ -561,6 +581,8 @@ impl LauncherUi {
         };
         let id = self.next_task_id;
         self.next_task_id += 1;
+        let command = args.first().cloned().unwrap_or_default();
+        let key = args.join("\u{1f}");
         let handle = Arc::new(TaskHandle {
             child: Mutex::new(None),
             cancelled: AtomicBool::new(false),
@@ -569,6 +591,8 @@ impl LauncherUi {
             id,
             title,
             instance,
+            command,
+            key,
             state: TaskState::Running,
             progress: None,
             log_lines: VecDeque::new(),
@@ -590,11 +614,10 @@ impl LauncherUi {
         cx.spawn(async move |weak, cx| {
             let mut success = false;
             while let Ok(event) = event_rx.recv().await {
-                let stop = match event {
+                match event {
                     TaskEvent::Log(line) => {
                         weak.update(cx, |this, cx| this.push_task_log(id, line, cx))
                             .ok();
-                        false
                     }
                     TaskEvent::Progress { done, total } => {
                         weak.update(cx, |this, cx| {
@@ -609,15 +632,10 @@ impl LauncherUi {
                             cx.notify();
                         })
                         .ok();
-                        false
                     }
                     TaskEvent::Done(ok) => {
                         success = ok;
-                        true
                     }
-                };
-                if stop {
-                    break;
                 }
             }
             weak.update(cx, |this, cx| {
@@ -704,7 +722,7 @@ impl LauncherUi {
     }
 
     fn launch_instance(&mut self, name: &str, cx: &mut Context<Self>) {
-        if let Some(id) = self.running_task_for(name) {
+        if let Some(id) = self.running_launch_for(name) {
             self.active_task = Some(id);
             cx.notify();
             return;
@@ -1034,6 +1052,11 @@ impl LauncherUi {
                 },
             ))
         };
+        if let Some(id) = self.running_task_with_key(&args.join("\u{1f}")) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
         let title = self.t_args("task.title.install", &[("version", &version)]);
         self.start_task(
             title,
@@ -1263,6 +1286,11 @@ impl LauncherUi {
             args.push(String::from("--with-optional"));
         }
 
+        if let Some(id) = self.running_task_with_key(&args.join("\u{1f}")) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
         let instance = (!name.is_empty()).then(|| SharedString::from(name.clone()));
         self.start_task(
             self.t("task.title.import"),
@@ -1294,7 +1322,6 @@ impl LauncherUi {
         }
 
         let project_type = String::from(self.search_type());
-        let key = project_type.clone();
         let loaders: Vec<String> = if matches!(self.download_tab, 2 | 4) {
             split_values(&Self::value(&self.mod_loader_input, cx))
         } else {
@@ -1311,6 +1338,11 @@ impl LauncherUi {
                 .unwrap_or_default()
         };
         let limit: u32 = Self::value(&self.mod_limit_input, cx).parse().unwrap_or(10);
+        let key = format!(
+            "{query}\u{1f}{project_type}\u{1f}{}\u{1f}{}\u{1f}{limit}",
+            loaders.join(","),
+            versions.join(",")
+        );
 
         self.search_results.clear();
         self.search_icons.clear();
@@ -1589,6 +1621,11 @@ impl LauncherUi {
             args.push(version);
         }
 
+        if let Some(id) = self.running_task_with_key(&args.join("\u{1f}")) {
+            self.active_task = Some(id);
+            cx.notify();
+            return;
+        }
         let title = self.t_args("task.title.add", &[("slug", &slug)]);
         self.start_task(
             title,
@@ -1698,10 +1735,7 @@ impl LauncherUi {
                 return Some(selected.clone());
             }
         }
-        if let Some(first) = filtered.first() {
-            return Some(first.id.clone());
-        }
-        self.mod_versions.first().map(|version| version.id.clone())
+        filtered.first().map(|version| version.id.clone())
     }
 
     fn render_project_detail(
@@ -1896,8 +1930,14 @@ impl LauncherUi {
         };
 
         let action = if pack {
-            primary_button("pack-detail-import", self.t("download.import.run"))
-                .on_click(cx.listener(|this, _, _, cx| this.import_modrinth(cx)))
+            if selected.is_none() {
+                disabled_button("pack-detail-import", self.t("download.import.run"))
+            } else {
+                primary_button("pack-detail-import", self.t("download.import.run"))
+                    .on_click(cx.listener(|this, _, _, cx| this.import_modrinth(cx)))
+            }
+        } else if selected.is_none() {
+            disabled_button("detail-install", self.t("download.content.add"))
         } else {
             primary_button("detail-install", self.t("download.content.add")).on_click(
                 cx.listener(|this, _, _, cx| this.add_mod(cx)),
@@ -2169,9 +2209,6 @@ impl LauncherUi {
     }
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
-        if Self::value(&self.memory_input, cx).is_empty() {
-            return;
-        }
         let value = self.settings_value(cx);
         if value == self.saved_settings {
             return;
@@ -2267,6 +2304,11 @@ fn execute(
             let _ = tx.send_blocking(TaskEvent::Done(false));
             return false;
         };
+        if task.cancelled.load(Ordering::SeqCst) {
+            std::thread::spawn(move || kill_tree(child));
+            let _ = tx.send_blocking(TaskEvent::Done(false));
+            return false;
+        }
         *slot = Some(child);
     }
 
@@ -2935,7 +2977,7 @@ impl LauncherUi {
             if index > 0 {
                 list = list.child(sep());
             }
-            let running = self.running_task_for(&launch_name);
+            let running = self.running_launch_for(&launch_name);
             list =
                 list.child(
                     row().child(row_text(row_data.name.clone(), meta)).child(

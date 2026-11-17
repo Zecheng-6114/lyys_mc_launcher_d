@@ -60,17 +60,19 @@ pub fn parse(manifest: &Value, client: &mut CurseClient) -> Result<PackManifest,
         let file_type = file["type"].as_str().unwrap_or_default();
         match file_type {
             "addon" => {
-                let Some(path) = file["path"].as_str() else {
+                let Some(raw_path) = file["path"].as_str() else {
                     continue;
                 };
-                if !accept(path, install_mods, install_resourcepacks) {
-                    continue;
-                }
-                let path = archive::safe_relative(path)?
+                let path = archive::safe_relative(raw_path)?
                     .to_string_lossy()
                     .replace('\\', "/");
-                let Some(file_api) = &file_api else {
+                if !accept(&path, install_mods, install_resourcepacks) {
                     continue;
+                }
+                let Some(file_api) = &file_api else {
+                    return Err(String::from(
+                        "MCBBS manifest has addon files but no fileApi; cannot resolve download URL",
+                    ));
                 };
                 files.push(PackFile {
                     path: path.clone(),
@@ -97,6 +99,7 @@ pub fn parse(manifest: &Value, client: &mut CurseClient) -> Result<PackManifest,
                     file_id,
                     file["fileName"].as_str(),
                     file["url"].as_str(),
+                    file["classId"].as_i64(),
                 )?;
                 if !accept(resolved.category(), install_mods, install_resourcepacks) {
                     continue;

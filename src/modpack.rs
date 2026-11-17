@@ -200,9 +200,6 @@ pub fn import_file(path: &Path, options: &ImportOptions<'_>) -> Result<ImportRep
             )
         })?;
 
-        report.overrides =
-            archive::extract_overrides(path, &detected.prefix, &manifest.overrides, &game_dir)?;
-
         let mut tasks = Vec::new();
         let mut excluded = Vec::new();
         let mut paths = std::collections::HashSet::new();
@@ -235,6 +232,9 @@ pub fn import_file(path: &Path, options: &ImportOptions<'_>) -> Result<ImportRep
         report.files = tasks.len();
         report.excluded = excluded.clone();
         download::download_all(tasks, &options.origins)?;
+
+        report.overrides =
+            archive::extract_overrides(path, &detected.prefix, &manifest.overrides, &game_dir)?;
 
         if !archive::copy_entry(
             path,

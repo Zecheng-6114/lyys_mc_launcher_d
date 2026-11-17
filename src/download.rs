@@ -421,7 +421,7 @@ fn temp_path(dest: &Path) -> PathBuf {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| String::from("download"));
-    dest.with_file_name(format!("{name}.part"))
+    dest.with_file_name(format!("{name}.part.{}", std::process::id()))
 }
 
 fn http_error_is_client(error: &str) -> bool {

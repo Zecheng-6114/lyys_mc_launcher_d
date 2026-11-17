@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -25,7 +25,7 @@ pub fn build_args(
         .or_else(|| version["assets"].as_str())
         .unwrap_or("legacy");
     let version_type = version["type"].as_str().unwrap_or("release");
-    let natives = format!("{mc_dir}/natives");
+    let natives = natives_dir(mc_dir, jar_id);
     let classpath = classpath_of(mc_dir, version, jar_id);
     let features = default_features();
     let game_assets = game_assets_dir(mc_dir, asset_index);
@@ -354,8 +354,27 @@ pub fn native_files(version: &Value) -> Vec<NativeFile> {
     out
 }
 
-pub fn prepare_natives(mc_dir: &str, version: &Value) -> Result<(), String> {
-    let natives = Path::new(mc_dir).join("natives");
+fn natives_dir(mc_dir: &str, jar_id: &str) -> String {
+    let safe: String = jar_id
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = if safe.is_empty() { "instance" } else { &safe };
+    format!("{mc_dir}/natives/{safe}")
+}
+
+pub fn prepare_natives(mc_dir: &str, version: &Value, jar_id: &str) -> Result<(), String> {
+    let natives = PathBuf::from(natives_dir(mc_dir, jar_id));
+    if natives.exists() {
+        fs::remove_dir_all(&natives)
+            .map_err(|e| format!("failed to clean {}: {e}", natives.display()))?;
+    }
     fs::create_dir_all(&natives)
         .map_err(|e| format!("failed to create {}: {e}", natives.display()))?;
 

@@ -23,11 +23,21 @@ pub struct CurseFile {
 
 impl CurseFile {
     pub fn category(&self) -> &'static str {
-        match self.class_id {
-            Some(12) => "resourcepacks",
-            Some(6945) => "datapacks",
-            Some(6552) => "shaderpacks",
-            _ => "mods",
+        category_of(self.class_id, &self.file_name)
+    }
+}
+
+fn category_of(class_id: Option<i64>, file_name: &str) -> &'static str {
+    match class_id {
+        Some(12) => "resourcepacks",
+        Some(6945) => "datapacks",
+        Some(6552) => "shaderpacks",
+        _ => {
+            if file_name.to_ascii_lowercase().ends_with(".zip") {
+                "resourcepacks"
+            } else {
+                "mods"
+            }
         }
     }
 }
@@ -48,8 +58,9 @@ impl CurseClient {
         file_id: i64,
         file_name: Option<&str>,
         url: Option<&str>,
+        class_id_hint: Option<i64>,
     ) -> Result<CurseFile, String> {
-        self.resolve(project_id, file_id, file_name, url)
+        self.resolve(project_id, file_id, file_name, url, class_id_hint)
     }
 
     fn resolve(
@@ -58,16 +69,18 @@ impl CurseClient {
         file_id: i64,
         file_name: Option<&str>,
         url: Option<&str>,
+        class_id_hint: Option<i64>,
     ) -> Result<CurseFile, String> {
         if let (Some(file_name), Some(url)) = (file_name, url)
             && !file_name.is_empty()
             && !url.is_empty()
         {
+            let class_id = class_id_hint.or_else(|| self.class_id(project_id).ok());
             return Ok(CurseFile {
                 file_name: file_name.to_string(),
                 url: url.to_string(),
                 sha1: None,
-                class_id: self.class_id(project_id).ok(),
+                class_id,
             });
         }
 
@@ -102,11 +115,12 @@ impl CurseClient {
             .and_then(|hash| hash["value"].as_str())
             .map(str::to_string);
 
+        let class_id = class_id_hint.or_else(|| self.class_id(project_id).ok());
         Ok(CurseFile {
             file_name,
             url,
             sha1,
-            class_id: self.class_id(project_id).ok(),
+            class_id,
         })
     }
 
@@ -174,6 +188,7 @@ pub fn parse(
             file_id,
             entry["fileName"].as_str(),
             entry["url"].as_str(),
+            entry["classId"].as_i64(),
         )?;
 
         let path =
