@@ -3,6 +3,7 @@ mod catalog;
 mod cli;
 mod download;
 mod gui;
+mod gui_blitz;
 mod i18n;
 mod installer;
 mod instance;
@@ -27,7 +28,19 @@ fn absolute_path(path: &str) -> String {
 }
 
 fn main() {
-    if std::env::args().len() > 1 {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if args.first().map(String::as_str) == Some("--ui") {
+        let choice = match args.get(1).map(String::as_str) {
+            Some("blitz") => Some(Ui::Blitz),
+            Some("classic") => Some(Ui::Classic),
+            _ => None,
+        };
+        launch_gui(choice);
+        return;
+    }
+
+    if !args.is_empty() {
         match cli::parse() {
             cli::Command::Launch(c) => run_launch(&c),
             cli::Command::Download(c) => run_download(&c),
@@ -43,10 +56,32 @@ fn main() {
         return;
     }
 
+    launch_gui(None);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ui {
+    Classic,
+    Blitz,
+}
+
+fn launch_gui(choice: Option<Ui>) {
     #[cfg(windows)]
     hide_console();
 
-    if let Err(error) = gui::run() {
+    let ui = choice.unwrap_or_else(|| {
+        if gui::load_settings().experimental_ui {
+            Ui::Blitz
+        } else {
+            Ui::Classic
+        }
+    });
+    let result = match ui {
+        Ui::Blitz => gui_blitz::run(),
+        Ui::Classic => gui::run(),
+    };
+
+    if let Err(error) = result {
         eprintln!("gui error: {error}");
         std::process::exit(1);
     }

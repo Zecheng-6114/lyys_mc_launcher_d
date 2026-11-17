@@ -83,6 +83,8 @@
   "settings.maven.title": "Maven 仓库",
   "settings.language.title": "语言",
   "settings.isolate.title": "版本隔离",
+  "settings.ui.title": "实验性界面",
+  "settings.ui.hint": "使用基于 Blitz 的新界面，重启后生效",
   "settings.save": "保存全局设置",
 
   "install.version.title": "实例版本",

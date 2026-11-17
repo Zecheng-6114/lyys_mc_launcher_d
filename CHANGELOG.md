@@ -11,6 +11,7 @@
 - 设置页 Java 路径支持自动检测并列出本机 Java；实例设置页显示所需 Java 版本并支持一键按版本选择
 - Java 探测支持添加自定义扫描目录（`user_java`、`java add|remove --path`），含多个 JDK 的父目录可一次添加
 - Java 探测缓存改为按可执行文件与 `release` 文件指纹校验，JDK 更新后自动失效
+- 新增基于 Dioxus + Blitz 的实验性界面，可在设置页开关或 `--ui blitz|classic` 选择，默认关闭
 
 ### 变更
 - 图形界面依赖统一为 `gpui-kit`，原有的五项 GUI 依赖合并为一项

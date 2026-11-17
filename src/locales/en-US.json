@@ -83,6 +83,8 @@
   "settings.maven.title": "Maven repository",
   "settings.language.title": "Language",
   "settings.isolate.title": "Version isolation",
+  "settings.ui.title": "Experimental interface",
+  "settings.ui.hint": "Use the new Blitz-based interface, takes effect after restart",
   "settings.save": "Save global settings",
 
   "install.version.title": "Instance version",

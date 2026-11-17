@@ -13,4 +13,16 @@ zip = "9.6.0"
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 open = "5.4"
 gpui-kit = { version = "0.10.0", features = ["gpui-fast"] }
+dioxus = { version = "0.8.0-alpha.3", default-features = false, features = [
+    "macro",
+    "html",
+    "signals",
+    "hooks",
+    "launch",
+    "native",
+] }
+rfd = { version = "0.17.1", default-features = false, features = ["xdg-portal"] }
+# Blitz 上游特性组合缺陷：stylo_taffy 只在 floats 特性下写入 taffy 的 float/clear 字段，
+# 而字段本身由 taffy/float_layout 控制，这里显式开启 blitz-dom 的 floats 特性补齐特性并集。
+blitz-dom = { version = "=0.3.0-beta.4", features = ["floats"] }
 smol = "2"

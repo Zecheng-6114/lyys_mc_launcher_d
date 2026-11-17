@@ -22,6 +22,7 @@ A Minecraft launcher built with Rust and GPUI, offering both a graphical interfa
 - **Account management**: add Microsoft and offline accounts, switch the current account, or remove one from the Accounts page; launching uses the selected account automatically
 - **Multilingual**: Simplified Chinese / English / Japanese
 - **Parallel tasks**: the graphical interface supports running multiple tasks in parallel with live logs
+- **Experimental interface**: an optional second interface built on Dioxus + Blitz (native wgpu rendering), off by default
 
 ## Requirements
 
@@ -41,6 +42,18 @@ The artifact is located at `target/release/lyys_mc_launcher` (`lyys_mc_launcher.
 ### Graphical interface
 
 Run the executable without arguments to open the graphical interface.
+
+The experimental interface is selected by the `experimental_ui` config field or a launch flag, and takes effect after a restart:
+
+```bash
+# Start the experimental Dioxus + Blitz interface
+lyys_mc_launcher --ui blitz
+
+# Force the original GPUI interface
+lyys_mc_launcher --ui classic
+```
+
+The same switch is available on the Settings page. The experimental interface needs a working graphics adapter (D3D12 / Vulkan).
 
 ### Command line
 
@@ -103,6 +116,7 @@ The global configuration is located at `<base dir>/lyys_mc_launcher/config.json`
 | `maven` | Mirror for Maven repositories |
 | `isolate` | Whether instance isolation is enabled by default |
 | `language` | Interface language (`zh-CN` / `en-US` / `ja-JP`) |
+| `experimental_ui` | Whether to use the experimental interface (Dioxus + Blitz), `false` by default |
 | `user_java` | Manually added Java scan paths (executable, Java home or a parent folder containing several JDKs) |
 
 The base directory is resolved as follows: starting from the directory containing the executable, walk up until a directory that contains `Cargo.toml` is found; in a development environment this is the project root, otherwise the current working directory is used.
@@ -122,6 +136,7 @@ src/
 ├── main.rs        # Entry point: CLI dispatch or GUI startup
 ├── cli.rs         # Command-line parsing
 ├── gui.rs         # GPUI graphical interface
+├── gui_blitz/     # Experimental interface (Dioxus + Blitz, theme.css holds the styles)
 ├── i18n.rs        # Multilingual support
 ├── locales/       # Locale resources (en-US / zh-CN / ja-JP)
 ├── version.rs     # Version JSON parsing and inheritance-chain merging

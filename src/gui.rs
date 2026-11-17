@@ -118,12 +118,12 @@ fn apply_skin(cx: &mut App) {
     });
 }
 
-struct TaskHandle {
-    child: Mutex<Option<std::process::Child>>,
-    cancelled: AtomicBool,
+pub(crate) struct TaskHandle {
+    pub(crate) child: Mutex<Option<std::process::Child>>,
+    pub(crate) cancelled: AtomicBool,
 }
 
-enum TaskEvent {
+pub(crate) enum TaskEvent {
     Log(String),
     Progress { done: usize, total: usize },
     Done(bool),
@@ -168,11 +168,11 @@ struct TaskEntry {
 }
 
 #[derive(Clone)]
-struct InstanceRow {
-    name: SharedString,
-    version: SharedString,
-    loader: SharedString,
-    isolated: bool,
+pub(crate) struct InstanceRow {
+    pub(crate) name: SharedString,
+    pub(crate) version: SharedString,
+    pub(crate) loader: SharedString,
+    pub(crate) isolated: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -212,6 +212,7 @@ pub struct LauncherUi {
     mirror_input: Entity<input::InputState>,
     maven_input: Entity<input::InputState>,
     isolate: bool,
+    experimental_ui: bool,
 
     install_version_input: Entity<input::InputState>,
     install_name_input: Entity<input::InputState>,
@@ -334,6 +335,7 @@ impl LauncherUi {
             mirror_input: input(window, &settings.mirror, cx),
             maven_input: input(window, &settings.maven, cx),
             isolate: settings.isolate,
+            experimental_ui: settings.experimental_ui,
 
             install_version_input: input(window, "1.20.1", cx),
             install_name_input: input(window, "", cx),
@@ -500,6 +502,7 @@ impl LauncherUi {
             value["language"] = json!(language.to_string());
         }
         value["user_java"] = json!(crate::java::user_paths());
+        value["experimental_ui"] = json!(self.experimental_ui);
         value
     }
 
@@ -2222,7 +2225,7 @@ fn input(
     })
 }
 
-fn kill_tree(mut child: std::process::Child) {
+pub(crate) fn kill_tree(mut child: std::process::Child) {
     #[cfg(windows)]
     {
         let pid = child.id().to_string();
@@ -2242,7 +2245,7 @@ fn kill_tree(mut child: std::process::Child) {
     let _ = child.wait();
 }
 
-fn execute(
+pub(crate) fn execute(
     exe: PathBuf,
     args: Vec<String>,
     tx: channel::Sender<TaskEvent>,
@@ -2333,7 +2336,7 @@ fn execute(
     }
 }
 
-fn pump<R: Read + Send + 'static>(reader: R, tx: channel::Sender<TaskEvent>) {
+pub(crate) fn pump<R: Read + Send + 'static>(reader: R, tx: channel::Sender<TaskEvent>) {
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
     loop {
@@ -2371,7 +2374,7 @@ fn pump<R: Read + Send + 'static>(reader: R, tx: channel::Sender<TaskEvent>) {
     }
 }
 
-fn non_empty(value: String) -> Option<String> {
+pub(crate) fn non_empty(value: String) -> Option<String> {
     if value.trim().is_empty() {
         None
     } else {
@@ -2379,14 +2382,14 @@ fn non_empty(value: String) -> Option<String> {
     }
 }
 
-fn push_option(args: &mut Vec<String>, flag: &str, value: &str) {
+pub(crate) fn push_option(args: &mut Vec<String>, flag: &str, value: &str) {
     if !value.is_empty() {
         args.push(flag.to_string());
         args.push(value.to_string());
     }
 }
 
-fn split_values(value: &str) -> Vec<String> {
+pub(crate) fn split_values(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(|item| item.trim().to_string())
@@ -2394,7 +2397,7 @@ fn split_values(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn clip_text(text: &str, max: usize) -> String {
+pub(crate) fn clip_text(text: &str, max: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max {
         return trimmed.to_string();
@@ -2461,7 +2464,7 @@ fn image_format_from_url(url: &str) -> ImageFormat {
     }
 }
 
-fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
+pub(crate) fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
     let versions = Path::new(mc_dir).join("versions");
     let Ok(entries) = std::fs::read_dir(&versions) else {
         return Vec::new();
@@ -2497,14 +2500,15 @@ fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
     rows
 }
 
-struct Settings {
-    game_dir: String,
-    memory: Option<u32>,
-    java: String,
-    mirror: String,
-    maven: String,
-    isolate: bool,
-    language: Option<String>,
+pub(crate) struct Settings {
+    pub(crate) game_dir: String,
+    pub(crate) memory: Option<u32>,
+    pub(crate) java: String,
+    pub(crate) mirror: String,
+    pub(crate) maven: String,
+    pub(crate) isolate: bool,
+    pub(crate) language: Option<String>,
+    pub(crate) experimental_ui: bool,
 }
 
 impl Settings {
@@ -2517,11 +2521,12 @@ impl Settings {
             maven: String::new(),
             isolate: false,
             language: None,
+            experimental_ui: false,
         }
     }
 }
 
-fn load_settings() -> Settings {
+pub(crate) fn load_settings() -> Settings {
     let Ok(text) = std::fs::read_to_string(config_path()) else {
         return Settings::fallback();
     };
@@ -2543,16 +2548,17 @@ fn load_settings() -> Settings {
         maven: value["maven"].as_str().unwrap_or("").to_string(),
         isolate: value["isolate"].as_bool().unwrap_or(false),
         language: value["language"].as_str().map(str::to_string),
+        experimental_ui: value["experimental_ui"].as_bool().unwrap_or(false),
     }
 }
 
-fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     crate::loader::base_dir()
         .join("lyys_mc_launcher")
         .join("config.json")
 }
 
-fn write_json(path: &Path, value: &Value, lang: Lang) -> Result<(), String> {
+pub(crate) fn write_json(path: &Path, value: &Value, lang: Lang) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
             i18n::text_args(lang, "error.create_dir", &[("error", &e.to_string())]).to_string()
@@ -2592,17 +2598,17 @@ fn dot(color: u32, size: f32) -> Div {
 }
 
 #[cfg(target_os = "windows")]
-fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+pub(crate) fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
     Command::new("explorer").arg(path).spawn()
 }
 
 #[cfg(target_os = "macos")]
-fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+pub(crate) fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
     Command::new("open").arg(path).spawn()
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
+pub(crate) fn open_directory(path: &Path) -> std::io::Result<std::process::Child> {
     Command::new("xdg-open").arg(path).spawn()
 }
 
@@ -3785,6 +3791,34 @@ impl LauncherUi {
                                                     Lang::JaJp,
                                                     self.lang == Lang::JaJp,
                                                     cx,
+                                                )),
+                                        ),
+                                ),
+                            )
+                            .child(
+                                panel().child(
+                                    row()
+                                        .child(
+                                            v_flex()
+                                                .min_w_0()
+                                                .gap(px(3.))
+                                                .child(row_title(self.t("settings.ui.title")))
+                                                .child(
+                                                    div()
+                                                        .text_size(px(12.5))
+                                                        .text_color(skin::c(skin::MUTED))
+                                                        .child(self.t("settings.ui.hint")),
+                                                ),
+                                        )
+                                        .child(
+                                            Switch::new("settings-experimental-ui")
+                                                .checked(self.experimental_ui)
+                                                .on_click(cx.listener(
+                                                    |this, checked: &bool, _, cx| {
+                                                        this.experimental_ui = *checked;
+                                                        this.save_settings(cx);
+                                                        cx.notify();
+                                                    },
                                                 )),
                                         ),
                                 ),

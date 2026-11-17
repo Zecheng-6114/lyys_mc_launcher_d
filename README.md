@@ -22,6 +22,7 @@
 - **账号管理**：图形界面「账号」页可添加微软账号与离线账号，切换当前账号或删除；启动时自动使用所选账号
 - **多语言**：简体中文 / English / 日本語
 - **任务并行**：图形界面支持多任务并行执行与实时日志
+- **实验性界面**：可选用基于 Dioxus + Blitz（wgpu 原生渲染）的第二套界面，默认关闭
 
 ## 环境要求
 
@@ -41,6 +42,18 @@ cargo build --release
 ### 图形界面
 
 直接运行可执行文件（不带参数）即可打开图形界面。
+
+实验性界面由配置项 `experimental_ui` 或启动参数选择，重启后生效：
+
+```bash
+# 使用基于 Dioxus + Blitz 的实验性界面
+lyys_mc_launcher --ui blitz
+
+# 强制使用原 GPUI 界面
+lyys_mc_launcher --ui classic
+```
+
+也可在「设置」页打开同名开关。实验性界面需要可用的图形适配器（D3D12 / Vulkan）。
 
 ### 命令行
 
@@ -103,6 +116,7 @@ lyys_mc_launcher java add --path D:\tools\java
 | `maven` | Maven 库镜像 |
 | `isolate` | 是否默认开启实例隔离 |
 | `language` | 界面语言（`zh-CN` / `en-US` / `ja-JP`） |
+| `experimental_ui` | 是否使用实验性界面（Dioxus + Blitz），默认 `false` |
 | `user_java` | 手动添加的 Java 扫描路径（可执行文件、Java 主目录或包含多个 JDK 的父目录） |
 
 基目录的确定规则：从可执行文件所在目录逐级向上查找包含 `Cargo.toml` 的目录；开发环境即为项目根目录，否则使用当前工作目录。
@@ -122,6 +136,7 @@ src/
 ├── main.rs        # 入口：CLI 分发或 GUI 启动
 ├── cli.rs         # 命令行解析
 ├── gui.rs         # GPUI 图形界面
+├── gui_blitz/     # 实验性界面（Dioxus + Blitz，theme.css 为样式）
 ├── i18n.rs        # 多语言支持
 ├── locales/       # 多语言资源（en-US / zh-CN / ja-JP）
 ├── version.rs     # 版本 JSON 解析与继承链合并

@@ -83,6 +83,8 @@
   "settings.maven.title": "Maven リポジトリ",
   "settings.language.title": "言語",
   "settings.isolate.title": "バージョン分離",
+  "settings.ui.title": "実験的な画面",
+  "settings.ui.hint": "Blitz ベースの新しい画面を使用します（再起動後に反映）",
   "settings.save": "グローバル設定を保存",
 
   "install.version.title": "インスタンスバージョン",
