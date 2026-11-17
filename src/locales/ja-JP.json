@@ -70,7 +70,6 @@
   "accounts.uuid.offline": "UUID: {uuid} · オフライン",
   "page.settings.title": "設定",
   "settings.game_dir.title": "ゲームディレクトリ",
-  "settings.username.title": "ユーザー名",
   "settings.memory.title": "メモリ (MB)",
   "settings.java.title": "Java パス",
   "settings.java.detect": "自動検出",

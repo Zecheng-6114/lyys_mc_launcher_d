@@ -207,7 +207,6 @@ pub struct LauncherUi {
     task_log_follow: bool,
 
     dir_input: Entity<input::InputState>,
-    username_input: Entity<input::InputState>,
     memory_input: Entity<input::InputState>,
     java_input: Entity<input::InputState>,
     mirror_input: Entity<input::InputState>,
@@ -218,7 +217,6 @@ pub struct LauncherUi {
     install_name_input: Entity<input::InputState>,
     install_loader_input: Entity<input::InputState>,
     install_loader_version_input: Entity<input::InputState>,
-    install_username_input: Entity<input::InputState>,
     install_memory_input: Entity<input::InputState>,
     install_java_input: Entity<input::InputState>,
     install_mirror_input: Entity<input::InputState>,
@@ -237,7 +235,6 @@ pub struct LauncherUi {
     download_version_query: Entity<input::InputState>,
 
     cfg_name: SharedString,
-    cfg_username_input: Entity<input::InputState>,
     cfg_memory_input: Entity<input::InputState>,
     cfg_java_input: Entity<input::InputState>,
     cfg_mirror_input: Entity<input::InputState>,
@@ -332,7 +329,6 @@ impl LauncherUi {
             task_log_follow: false,
 
             dir_input: input(window, &settings.game_dir, cx),
-            username_input: input(window, &settings.username, cx),
             memory_input: input(window, &memory, cx),
             java_input: input(window, &settings.java, cx),
             mirror_input: input(window, &settings.mirror, cx),
@@ -343,7 +339,6 @@ impl LauncherUi {
             install_name_input: input(window, "", cx),
             install_loader_input: input(window, "", cx),
             install_loader_version_input: input(window, "", cx),
-            install_username_input: input(window, &settings.username, cx),
             install_memory_input: input(window, &memory.clone(), cx),
             install_java_input: input(window, &settings.java.clone(), cx),
             install_mirror_input: input(window, &settings.mirror.clone(), cx),
@@ -362,7 +357,6 @@ impl LauncherUi {
             download_version_query: input(window, "", cx),
 
             cfg_name: SharedString::default(),
-            cfg_username_input: input(window, "", cx),
             cfg_memory_input: input(window, &memory.clone(), cx),
             cfg_java_input: input(window, &settings.java.clone(), cx),
             cfg_mirror_input: input(window, &settings.mirror.clone(), cx),
@@ -429,7 +423,6 @@ impl LauncherUi {
         .detach();
         for watched in [
             &this.dir_input,
-            &this.username_input,
             &this.memory_input,
             &this.java_input,
             &this.mirror_input,
@@ -438,7 +431,6 @@ impl LauncherUi {
             cx.observe(watched, |_, _, cx| cx.notify()).detach();
         }
         for watched in [
-            &this.cfg_username_input,
             &this.cfg_memory_input,
             &this.cfg_java_input,
             &this.cfg_mirror_input,
@@ -498,7 +490,6 @@ impl LauncherUi {
         let memory = self.memory_value(&self.memory_input, cx);
         let mut value = json!({
             "game_dir": Self::value(&self.dir_input, cx),
-            "username": Self::value(&self.username_input, cx),
             "memory": memory.unwrap_or(4096),
             "java": Self::value(&self.java_input, cx),
             "mirror": Self::value(&self.mirror_input, cx),
@@ -700,9 +691,6 @@ impl LauncherUi {
         let dir = Self::value(&self.dir_input, cx);
         let config = instance::read_launch_config(&dir, name);
         let params = LaunchParams {
-            username: config
-                .username
-                .unwrap_or_else(|| Self::value(&self.username_input, cx)),
             memory: config
                 .memory
                 .or_else(|| self.memory_value(&self.memory_input, cx)),
@@ -748,9 +736,6 @@ impl LauncherUi {
                     .map(|account| account.to_string())
                     .unwrap_or_default(),
             );
-        } else if self.account.is_none() {
-            args.push(String::from("--username"));
-            args.push(params.username);
         }
         if params.isolate {
             args.push(String::from("--isolate"));
@@ -1014,7 +999,6 @@ impl LauncherUi {
         let name = Self::value(&self.install_name_input, cx);
         let loader = Self::value(&self.install_loader_input, cx);
         let loader_version = Self::value(&self.install_loader_version_input, cx);
-        let username = Self::value(&self.install_username_input, cx);
         let java = Self::value(&self.install_java_input, cx);
         let mirror = Self::value(&self.install_mirror_input, cx);
         let maven = Self::value(&self.install_maven_input, cx);
@@ -1042,7 +1026,6 @@ impl LauncherUi {
                 dir,
                 name,
                 LaunchConfig {
-                    username: Some(username),
                     memory,
                     java: Some(java),
                     mirror: Some(mirror),
@@ -2016,7 +1999,6 @@ impl LauncherUi {
         let config = instance::read_launch_config(&dir, name);
         self.cfg_name = SharedString::from(name.to_string());
 
-        Self::set_input(&self.cfg_username_input, config.username.as_deref().unwrap_or(""), window, cx);
         let memory = config
             .memory
             .map(|value| value.to_string())
@@ -2042,7 +2024,6 @@ impl LauncherUi {
 
     fn cfg_current(&self, cx: &Context<Self>) -> LaunchConfig {
         LaunchConfig {
-            username: non_empty(Self::value(&self.cfg_username_input, cx)),
             memory: self.memory_value(&self.cfg_memory_input, cx),
             java: non_empty(Self::value(&self.cfg_java_input, cx)),
             mirror: non_empty(Self::value(&self.cfg_mirror_input, cx)),
@@ -2221,7 +2202,6 @@ impl LauncherUi {
 }
 
 struct LaunchParams {
-    username: String,
     memory: Option<u32>,
     java: String,
     mirror: String,
@@ -2519,7 +2499,6 @@ fn list_instances(mc_dir: &str) -> Vec<InstanceRow> {
 
 struct Settings {
     game_dir: String,
-    username: String,
     memory: Option<u32>,
     java: String,
     mirror: String,
@@ -2532,7 +2511,6 @@ impl Settings {
     fn fallback() -> Self {
         Settings {
             game_dir: String::new(),
-            username: String::from("Player"),
             memory: Some(4096),
             java: String::new(),
             mirror: String::new(),
@@ -2556,10 +2534,6 @@ fn load_settings() -> Settings {
         game_dir: value["game_dir"]
             .as_str()
             .unwrap_or(&default.game_dir)
-            .to_string(),
-        username: value["username"]
-            .as_str()
-            .unwrap_or(&default.username)
             .to_string(),
         memory: value["memory"]
             .as_u64()
@@ -3717,12 +3691,6 @@ impl LauncherUi {
                                     .child(sep())
                                     .child(
                                         row()
-                                            .child(row_title(self.t("settings.username.title")))
-                                            .child(self.input_control(&self.username_input)),
-                                    )
-                                    .child(sep())
-                                    .child(
-                                        row()
                                             .child(row_title(self.t("settings.memory.title")))
                                             .child(self.input_control(&self.memory_input)),
                                     ),
@@ -4275,12 +4243,6 @@ impl LauncherUi {
                 panel()
                     .child(
                         row()
-                            .child(row_title(self.t("settings.username.title")))
-                            .child(self.input_control(&self.install_username_input)),
-                    )
-                    .child(sep())
-                    .child(
-                        row()
                             .child(row_title(self.t("settings.memory.title")))
                             .child(self.input_control(&self.install_memory_input)),
                     )
@@ -4426,7 +4388,6 @@ impl LauncherUi {
     }
 
     fn render_instance_settings_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let global_username = Self::value(&self.username_input, cx);
         let global_memory = self
             .memory_value(&self.memory_input, cx)
             .map(|value| value.to_string())
@@ -4482,17 +4443,6 @@ impl LauncherUi {
                                                     .text_color(skin::c(skin::MUTED))
                                                     .child(self.t("instance_settings.override")),
                                             ),
-                                    )
-                                    .child(sep())
-                                    .child(
-                                        row()
-                                            .child(row_title(self.t("settings.username.title")))
-                                            .child(self.cfg_override_control(
-                                                &self.cfg_username_input,
-                                                "cfg-reset-username",
-                                                global_username,
-                                                cx,
-                                            )),
                                     )
                                     .child(sep())
                                     .child(

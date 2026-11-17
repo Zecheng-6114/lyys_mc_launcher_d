@@ -70,7 +70,6 @@
   "accounts.uuid.offline": "UUID: {uuid} · offline",
   "page.settings.title": "Settings",
   "settings.game_dir.title": "Game directory",
-  "settings.username.title": "Username",
   "settings.memory.title": "Memory (MB)",
   "settings.java.title": "Java path",
   "settings.java.detect": "Detect",

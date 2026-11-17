@@ -97,7 +97,6 @@ lyys_mc_launcher java add --path D:\tools\java
 | 字段 | 说明 |
 |---|---|
 | `game_dir` | 默认游戏根目录 |
-| `username` | 默认离线用户名 |
 | `memory` | 内存上限（MB） |
 | `java` | Java 可执行文件路径 |
 | `mirror` | Mojang 资源镜像 |

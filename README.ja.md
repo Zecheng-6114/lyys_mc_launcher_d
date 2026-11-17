@@ -97,7 +97,6 @@ lyys_mc_launcher java add --path D:\tools\java
 | フィールド | 説明 |
 |---|---|
 | `game_dir` | デフォルトのゲームルートディレクトリ |
-| `username` | デフォルトのオフラインユーザー名 |
 | `memory` | メモリ上限（MB） |
 | `java` | Java 実行ファイルのパス |
 | `mirror` | Mojang リソースのミラー |

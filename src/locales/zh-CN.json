@@ -70,7 +70,6 @@
   "accounts.uuid.offline": "UUID：{uuid} · 离线",
   "page.settings.title": "设置",
   "settings.game_dir.title": "游戏目录",
-  "settings.username.title": "用户名",
   "settings.memory.title": "内存 (MB)",
   "settings.java.title": "Java 路径",
   "settings.java.detect": "自动检测",

@@ -97,7 +97,6 @@ The global configuration is located at `<base dir>/lyys_mc_launcher/config.json`
 | Field | Description |
 |---|---|
 | `game_dir` | Default game root directory |
-| `username` | Default offline username |
 | `memory` | Memory limit (MB) |
 | `java` | Path to the Java executable |
 | `mirror` | Mirror for Mojang resources |

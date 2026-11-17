@@ -8,7 +8,6 @@ pub const LAUNCH_FILE: &str = "launch.json";
 
 #[derive(Default, Clone, PartialEq)]
 pub struct LaunchConfig {
-    pub username: Option<String>,
     pub memory: Option<u32>,
     pub java: Option<String>,
     pub mirror: Option<String>,
@@ -62,7 +61,6 @@ pub fn read_launch_config(mc_dir: &str, instance: &str) -> LaunchConfig {
     };
 
     LaunchConfig {
-        username: non_empty_string(&value, "username"),
         memory: value["memory"]
             .as_u64()
             .and_then(|value| u32::try_from(value).ok()),
@@ -84,9 +82,6 @@ pub fn write_launch_config(
     }
 
     let mut value = serde_json::Map::new();
-    if let Some(username) = &config.username {
-        value.insert(String::from("username"), Value::String(username.clone()));
-    }
     if let Some(memory) = config.memory {
         value.insert(String::from("memory"), Value::Number(memory.into()));
     }
