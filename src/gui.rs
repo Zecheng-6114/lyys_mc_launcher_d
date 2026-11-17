@@ -9,20 +9,19 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use gpui::{
+use gpui_kit::{
     AnyElement, App, AppContext, Bounds, Context, CursorStyle, Div, ElementId, Entity, Image,
     ImageFormat, IntoElement, ObjectFit, ParentElement, PathPromptOptions, Render, ScrollHandle,
     SharedString, Stateful, Styled, Window, WindowBounds, WindowOptions, div, img,
     prelude::*, px, size,
 };
-use gpui_component::{
+use gpui_kit::assets::Assets;
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Root, Sizable, StyledExt, TitleBar, h_flex, input,
     switch::Switch,
     theme::{Theme, ThemeMode},
     v_flex,
 };
-use gpui_kit_assets::Assets;
-use gpui_platform::application;
 use serde_json::{Value, json};
 use smol::channel;
 
@@ -33,7 +32,7 @@ use crate::modrinth;
 use crate::mods;
 
 mod skin {
-    use gpui::{Rgba, rgb};
+    use gpui_kit::{Rgba, rgb};
 
     pub const WINDOW: u32 = 0x0f0f0f;
     pub const TITLEBAR_LINE: u32 = 0x1f1f1f;
@@ -276,8 +275,8 @@ pub struct LauncherUi {
 }
 
 pub fn run() -> Result<(), Box<dyn Error>> {
-    application().with_assets(Assets).run(|cx: &mut App| {
-        gpui_component::init(cx);
+    gpui_kit::application().with_assets(Assets).run(|cx: &mut App| {
+        gpui_kit::init(cx);
         apply_skin(cx);
 
         let bounds = Bounds::centered(None, size(px(1180.), px(800.)), cx);
@@ -2810,7 +2809,7 @@ impl LauncherUi {
             .child(
                 div()
                     .pr(px(8.))
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(button),
             )
     }
@@ -4899,7 +4898,7 @@ impl LauncherUi {
                                 .child(
                                     div()
                                         .h_full()
-                                        .w(gpui::relative(value))
+                                        .w(gpui_kit::relative(value))
                                         .rounded_full()
                                         .bg(skin::c(skin::BUSY)),
                                 ),

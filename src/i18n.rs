@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use gpui::SharedString;
+use gpui_kit::SharedString;
 
 pub const FALLBACK: Lang = Lang::EnUs;
 

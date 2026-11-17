@@ -73,6 +73,7 @@
 * 提交方案时，禁止使用机器触发词（如“回复 Yes 触发”）。
 * 必须使用自然请示语：“方案如上，您看这样改可以吗？”
 * 在用户回复明确的授权词之前，AI 只准查阅（Read-only），不准执行（Write/Execute）。
+* **交付边界**：需求已经明确时，该交代码就交代码，不得用文档、方案或报告替代实际交付物；也不得为同一件事反复索要确认。
 
 **6. 破坏性操作与 Git 仓库保护的顶格防御**
 * 任何涉及 `git commit`、`git push`、`git rebase`、`git reset`、`git stash`、删除文件、修改全局配置等操作，属于**最高级别安全防御**。
@@ -129,7 +130,7 @@
 * 测试：`cargo test`；单测过滤：`cargo test <名字片段>`。测试在各模块 `#[cfg(test)]` 内，不依赖网络或外部服务。
 * GUI 正在运行时产物 exe 被占用，构建与测试会因无法写入而失败：改用独立产物目录重跑，例如
   `$env:CARGO_TARGET_DIR="$env:TEMP\lyys-target"; cargo build`（PowerShell）。
-* 发行由 `.github/workflows/release.yml` 完成：推送 `v*` 标签后在 Windows / Linux 构建并发布，不运行测试；发行笔记从 `CHANGELOG.md` 中以 `## [<tag>]` 开头的段落提取，标题必须与 tag 完全一致（如 `## [v0.0.4-alpha] - 2026-11-15`）。
+* 发行由 `.github/workflows/release.yml` 完成：推送 `v*` 标签后在 Windows / Linux 构建并发布，不运行测试；发行笔记从 `CHANGELOG.md` 中以 `## [<tag>]` 开头的段落提取，标题必须与 tag 完全一致（如 `## [v0.0.5-alpha] - 2026-11-16`）。
 * 项目无 `rustfmt.toml`，格式按 rustfmt 默认；CI 不跑 clippy 或测试。
 
 ### 双模式与任务执行模型
@@ -137,13 +138,14 @@
 * GUI 不直接调用业务函数，而是用 `current_exe()` 以子命令重新执行本程序完成每个任务，并注入环境变量 `LYYS_GUI=1`。
 * 子进程的 stdout/stderr 逐行显示在任务日志；以 `#progress <done>/<total>` 开头的行会被 GUI 解析为进度条（`download.rs` 仅在 `LYYS_GUI` 存在时输出该行）。新增带进度的操作时沿用此协议。
 * GUI 支持多任务并行；取消任务时 Windows 通过 `taskkill /T /F` 终止整棵进程树。
-* 只读查询是例外：Modrinth 搜索与版本列表在 GUI 内用 `cx.background_spawn` 直连（参考 `search_mods`），不经过任务协议。
+* 只读查询是例外：Modrinth 搜索、项目版本列表与 Java 探测在 GUI 内用 `cx.background_spawn` 直连（参考 `search_mods`），不经过任务协议。
 
 ### GUI 结构
 * `LauncherUi.tab`：0 实例 / 1 下载 / 2 设置 / 3 任务 / 4 账号；`download_tab`：0 实例安装 / 1 整合包 / 2 模组 / 3 资源包 / 4 光影包 / 5 数据包。
 * 下载页搜索结果点选进入项目详情页（状态字段 `mod_detail` / `mod_versions`），模组与整合包版本在详情页选择，分别经 `add --version`、`import --pack-version` 安装。
 * 实例版本（游戏版本）由所选实例经 `version::instance_info` 自动派生，与安装实际使用的版本同源；可选版本列表来自 `catalog.rs`（Mojang 清单），安装页与下载页共用。
 * 界面文案统一用 `self.t` / `self.t_args`；新增键须同时补齐三份 JSON。
+* 整体配色集中在 `gui.rs` 的 `mod skin`，由 `apply_skin` 写入组件主题（`Theme::update`）；调颜色改这两处即可。
 
 ### 多语言
 * 文案位于 `src/locales/{en-US,zh-CN,ja-JP}.json`，通过 `include_str!` 编译进二进制；三份文件键集必须完全一致（`i18n` 测试会失败），改文案后须重新构建才生效。
@@ -151,11 +153,14 @@
 * CLI 用法或配置字段变化时，同步更新三份 README。
 
 ### 容易踩坑的约定
-* `Cargo.toml` 中的 `gpui` 实际来自 `gpui-fast`（`package = "gpui-fast"`），排查时按此版本，而非上游 gpui 版本。
+* GUI 只直接依赖 `gpui-kit`（启用 `gpui-fast` 特性），代码统一用 `gpui_kit::` 路径：引擎 API 在根部，组件在 `gpui_kit::component`，图标资源在 `gpui_kit::assets`。
+* 引擎是 `gpui-fast` 分支（`0.1.16`），与 `gpui-kit` / `gpui-component` 的 `0.10.0` 不是同一套版本号；排查时按 `Cargo.lock` 中的包名核对，不要拿上游 GPUI 版本对照。
+* `gpui-kit` 会连带编译我们并不使用的上游 `gpui-pre*` 平台层（Windows 下是 `gpui-pre-platform` + `gpui-pre-windows`），首次构建耗时明显；改依赖后要预留整次重编时间。
 * 组件 `IconName` 仅包含 `gpui-kit-assets` 的 `default-icons.txt` 中列出的图标（如 `ArrowDown`、`Settings`）；`IconName::Download` 不存在，引用会编译失败。
-* `gpui::img()` 配 `Image::from_bytes` 可直接渲染 PNG/JPEG/WebP/BMP/ICO/SVG；Modrinth 图标为 webp，用 `download::get_bytes` 抓取即可，无需新增解码依赖。
-* CLI 解析为手写实现（`src/cli.rs` 用 `windows(2)` 扫描）：新增参数需同时改对应 `parse_*`、`USAGE`、三份 README 与 GUI 调用处 `start_task` 的参数。
-* 下载统一走 `download::download_all`（8 线程、`.part` 临时文件、sha1/sha512/大小校验、3 次重试）；镜像改写集中在 `Origins` / `rewrite`，Maven 只改写白名单主机。
+* `gpui_kit::img()` 配 `Image::from_bytes` 可直接渲染 PNG/JPEG/WebP/BMP/ICO/SVG；Modrinth 图标为 webp，用 `download::get_bytes` 抓取即可，无需新增解码依赖。
+* CLI 解析为手写实现（`src/cli.rs` 用 `windows(2)` 扫描）：新增参数需同时改对应 `parse_*`、`USAGE`、`main.rs` 的分发分支（新增子命令时）、三份 README 与 GUI 调用处 `start_task` 的参数。
+* 下载统一走 `download::download_all`（8 线程、`<文件名>.part.<pid>` 临时文件、sha1/sha512/大小校验、3 次重试）；镜像改写集中在 `Origins` / `rewrite`，Maven 只改写白名单主机。
 * 版本 JSON 合并 `inheritsFrom` 链后由 `version::integrate` 回写；改动合并逻辑会同时影响启动与加载器安装链路。
 * 整合包支持 Modrinth / CurseForge / MCBBS / Server（`src/modpack/` 下各 provider 一个文件）；MultiMC 可识别但未实现，Quilt 一律拒绝；CurseForge 清单缺少 `fileName` / `url` 时需要环境变量 `CURSEFORGE_API_KEY`。
-* 开发时运行会在仓库根生成运行时目录 `lyys_mc_launcher/`（`config.json`、`log/` 等，已被 `.gitignore` 忽略），属运行数据，不是源码。
+* Java 探测在 `src/java.rs`：缓存按可执行文件与同级 `release` 文件的大小/修改时间指纹失效，额外扫描目录存于配置 `user_java`；启动、安装与整合包导入未指定 `--java` 时都经它选择运行时。
+* 开发时运行会在仓库根生成运行时目录 `lyys_mc_launcher/`（`config.json`、`accounts.json`、`log/` 等，已被 `.gitignore` 忽略），属运行数据，不是源码。
