@@ -153,6 +153,12 @@ src/
 └── account.rs     # 离线 UUID
 ```
 
+## 赞助
+
+开发与维护由个人投入完成，如果您希望支持本项目，可以通过爱发电：
+
+<https://ifdian.net/a/luyiyisi>
+
 ## 许可证
 
 本项目基于 [GPL-3.0](LICENSE) 许可证发布。

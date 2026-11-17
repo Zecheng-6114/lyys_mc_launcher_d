@@ -153,6 +153,12 @@ src/
 └── account.rs     # Offline UUID
 ```
 
+## Sponsorship
+
+This project is developed and maintained by an individual. If you would like to support it, you can do so on Afdian:
+
+<https://ifdian.net/a/luyiyisi>
+
 ## License
 
 This project is licensed under [GPL-3.0](LICENSE).
