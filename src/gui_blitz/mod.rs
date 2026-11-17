@@ -460,8 +460,6 @@ fn app() -> Element {
                 {widgets::nav_item(state, 0, widgets::NavigationIcon::Dashboard, "nav.instances")}
                 {widgets::nav_item(state, 1, widgets::NavigationIcon::Download, "nav.download")}
                 div { class: "nav-section", "{nav_system}" }
-                {widgets::nav_item(state, 4, widgets::NavigationIcon::User, "nav.accounts")}
-                {widgets::nav_item(state, 2, widgets::NavigationIcon::Settings, "nav.settings")}
                 {widgets::nav_item_with_badge(
                     state,
                     3,
@@ -469,6 +467,8 @@ fn app() -> Element {
                     "nav.tasks",
                     running,
                 )}
+                {widgets::nav_item(state, 4, widgets::NavigationIcon::User, "nav.accounts")}
+                {widgets::nav_item(state, 2, widgets::NavigationIcon::Settings, "nav.settings")}
                 div { class: "spacer" }
                 div { class: "version", "{version}" }
             }
