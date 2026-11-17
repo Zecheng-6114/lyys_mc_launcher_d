@@ -158,14 +158,18 @@ pub fn major_of(java: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("failed to parse Java version: {version}"))
 }
 
+#[cfg(windows)]
 fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    use std::os::windows::process::CommandExt;
+
     let mut command = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
+    command.creation_flags(0x0800_0000);
     command
+}
+
+#[cfg(not(windows))]
+fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    Command::new(program)
 }
 
 fn scan(cache: &HashMap<String, CacheEntry>) -> (Vec<JavaRuntime>, HashMap<String, CacheEntry>) {
